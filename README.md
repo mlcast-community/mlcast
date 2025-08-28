@@ -10,7 +10,7 @@ This repo contains the `mlcast` package for machine learning-based weather nowca
 
 ## Installation
 ```bash
-# Install from pipy
+# Install from pypi
 pip install mlcast
 ```
 
