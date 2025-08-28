@@ -5,7 +5,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "mlcast"
-version = "0.0.1a3"
+version = "0.0.1a4"
 description = "Machine learning weather nowcasting library"
 readme = "README.md"
 keywords = [ "machine-learning", "meteorology", "nowcasting", "precipitation", "pytorch", "radar", "weather" ]
