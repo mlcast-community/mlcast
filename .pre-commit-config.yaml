@@ -1,0 +1,31 @@
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v5.0.0
+  hooks:
+  - id: check-yaml # Check YAML files for syntax errors only
+    args: [--unsafe, --allow-multiple-documents]
+  - id: debug-statements # Check for debugger imports and py37+ breakpoint()
+  - id: end-of-file-fixer # Ensure files end in a newline
+  - id: trailing-whitespace # Trailing whitespace checker
+  - id: check-added-large-files # Check for large files added to git
+  - id: check-merge-conflict # Check for files that contain merge conflict
+- repo: https://github.com/pre-commit/pygrep-hooks
+  rev: v1.10.0
+  hooks:
+  - id: python-use-type-annotations # Check for missing type annotations
+  - id: python-check-blanket-noqa # Check for # noqa: all
+  - id: python-no-log-warn # Check for log.warn
+# Ruff for both linting and formatting (replaces black, isort, flake8)
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.8.6
+  hooks:
+  - id: ruff # Linting
+    args: [--fix, --exit-non-zero-on-fix]
+  - id: ruff-format # Formatting
+- repo: https://github.com/tox-dev/pyproject-fmt
+  rev: "v2.6.0"
+  hooks:
+  - id: pyproject-fmt
+ci:
+  autoupdate_schedule: monthly
+  autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"

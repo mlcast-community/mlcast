@@ -18,7 +18,7 @@ This repo contains the `mlcast` package for machine learning-based precipitation
     - `convgru_modules.py` - ConvGRU-based encoder-decoder modules
 - `api_reference/` - Reference implementations and API examples
   - `pysteps_ref.py` - PySteps reference implementation
-  - `pl_ref.py` - PyTorch Lightning reference implementation  
+  - `pl_ref.py` - PyTorch Lightning reference implementation
   - `mlcast_api.py` - Proposed API design example
 
 Please feel free to raise issues or PRs if you have any suggestions or questions.
