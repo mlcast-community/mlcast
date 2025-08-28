@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from mlcast!")
+__version__ = "0.0.1"

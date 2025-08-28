@@ -6,20 +6,31 @@ requires = [ "hatchling" ]
 [project]
 name = "mlcast"
 version = "0.0.1"
-description = "mlcast nowcasting package"
+description = "Machine learning weather nowcasting library"
 readme = "README.md"
+keywords = [ "machine-learning", "meteorology", "nowcasting", "precipitation", "pytorch", "radar", "weather" ]
+license = { text = "Apache-2.0" }
+maintainers = [
+  { name = "MLCast Community", email = "franch@fbk.eu" },
+]
 authors = [
   { name = "Gabriele Franch", email = "franch@fbk.eu" },
-  { name = "Leif Denby" },
+  { name = "Leif Denby", email = "" },
 ]
 requires-python = ">=3.10"
 classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Atmospheric Science",
 ]
+
 dependencies = [
   "fire>=0.7",
   "ipykernel>=6.29.5",
@@ -34,7 +45,10 @@ optional-dependencies.dev = [
   "pre-commit>=3.5",
   "ruff>=0.8",
 ]
-scripts.mlcast = "mlcast:main"
+urls.Documentation = "https://github.com/mlcast/mlcast"
+urls.Homepage = "https://github.com/mlcast/mlcast"
+urls.Issues = "https://github.com/mlcast/mlcast/issues"
+urls.Repository = "https://github.com/mlcast/mlcast"
 
 [tool.ruff]
 line-length = 120
