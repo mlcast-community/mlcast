@@ -1,5 +1,7 @@
 # mlcast
 
+<!-- SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause -->
+
 The MLCast Community is a collaborative effort bringing together meteorological services, research institutions, and academia across Europe to develop a unified Python package for AI-based nowcasting. This is an initiative of the E-AI WG6 (Nowcasting) of EUMETNET.
 
 This repo contains the `mlcast` package for machine learning-based weather nowcasting.
@@ -71,4 +73,11 @@ Please feel free to raise issues or PRs if you have any suggestions or questions
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+This project is dual-licensed under either:
+
+* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+* BSD 3-Clause License ([LICENSE-BSD](LICENSE-BSD) or https://opensource.org/licenses/BSD-3-Clause)
+
+at your option.
+
+See [LICENSE](LICENSE) for more details.
