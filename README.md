@@ -69,7 +69,7 @@ Please feel free to raise issues or PRs if you have any suggestions or questions
 
 ## Links to presentations for discussion about the API
 
-- [2024/02/04 first design discussions](https://docs.google.com/presentation/d/1oWmnyxOfUMWgeQi0XyX4fX9YDMX1vl6h/edit?usp=drive_link&rtpof=true&sd=true)
+- [2025/02/04 first design discussions](https://docs.google.com/presentation/d/1oWmnyxOfUMWgeQi0XyX4fX9YDMX1vl6h/edit?usp=drive_link&rtpof=true&sd=true)
 
 ## License
 
