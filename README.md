@@ -110,7 +110,7 @@ from src.mlcast.models.ldcast.ldcast import LDCast
 ldcast = LDCast(ldm_lightning, autoencoder)
 ```
 
-# Notes
+# TO DO
 
 During training, an EMA scope was used for the weights of the denoiser, I removed this for the moment, but it should reincluded in some way.
 
@@ -120,24 +120,32 @@ I have understood that samplers are only used in inference ! The training (and v
 
 We might integrate this code within the Hugging Face Diffusers Library.
 
+It remains mainly to write code in the main LDCast class (in `ldcast.py`)
+
 # Basics on diffusion models
 
 See https://huggingface.co/blog/annotated-diffusion for some notations and formulas.
 
 During training, we start from a sample $x_0$ and create a series of samples $x_0, x_1, ..., x_T$ according to the formula (forward diffusion)
+
 $$
 x_t = \sqrt{\bar{\alpha}_t}x_0 + \sqrt{1-\bar{\alpha_t}}\epsilon_t, \quad t = 1, ..., T
 $$
+
 where $\epsilon_t \sim \mathcal{N}(0, 1)$. The constants $\bar{\alpha}_t$ are chosen, but they need the property that $\bar{\alpha}_t \to 0$ as $t \to T$, so that $x_T \sim \mathcal{N}(0, 1)$. These constants are computed with an algorithm called a scheduler.
 
 From a given $x_t$, the model can either be trained to predict $x_0$, $\epsilon_t$ or the velocity $v_t$. The latter is defined as
+
 $$
 v_t = \sqrt{\bar{\alpha}_t} \epsilon_t - \sqrt{1-\bar{\alpha}_t} x_0,
 $$
+
 which is equivalent to
+
 $$
 x_0 = \sqrt{\bar{\alpha}_t} x_t - \sqrt{1-\bar{\alpha}_t} v_t.
 $$
+
 The model is also given the timestep $t$. The loss is computed by comparing the target quantity ($\epsilon_t$, $x_0$ or $v_t$) with the predicted quantity by the model. Choosing to predict $x_0$, $\epsilon_t$ or $v_t$ is conceptually equivalent, the difference is in the numerical properties of the scheme (like in ODE integration schemes).
 
 The validation and test steps are done in the same way.
