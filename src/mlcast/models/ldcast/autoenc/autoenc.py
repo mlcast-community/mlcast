@@ -46,12 +46,15 @@ class AutoencoderKLNet(pl.LightningModule):
         self.log_var = nn.Parameter(torch.zeros(size=()))
         self.kl_weight = kl_weight
 
-    def encode(self, x):
+    def encode(self, x, return_log_var = False):
         if len(x.shape) < 5:
             x = x[None]
         h = self.encoder(x)
         (mean, log_var) = torch.chunk(self.to_moments(h), 2, dim=1)
-        return (mean, log_var)
+        if return_log_var:
+            return (mean, log_var)
+        else:
+            return mean
 
     def decode(self, z):
         z = self.to_decoder(z)
@@ -59,7 +62,7 @@ class AutoencoderKLNet(pl.LightningModule):
         return dec
 
     def forward(self, x, n_timesteps, sample_posterior=True):
-        (mean, log_var) = self.encode(x)
+        (mean, log_var) = self.encode(x, return_log_var = True)
         if sample_posterior:
             z = sample_from_standard_normal(mean, log_var)
         else:

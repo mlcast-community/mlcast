@@ -131,6 +131,12 @@ class NowcastingLightningModule(L.LightningModule):
         """
         return self.net(x, n_timesteps)  # Assuming net is a callable model
 
+    def training_logic(self, batch, batch_idx):
+        """Can be overwritten if needed"""
+        x, y = batch
+        predictions = self.forward(x, n_timesteps = 4)
+        loss = self.loss(predictions, y)
+    
     def model_step(self, batch: Any, batch_idx: int, step_name: str = "train") -> torch.Tensor:
         """Generic model step for training or validation.
 
@@ -141,9 +147,13 @@ class NowcastingLightningModule(L.LightningModule):
         Returns:
             Loss value for the current batch
         """
-        x, y = batch
-        predictions = self.forward(x, n_timesteps=4)
-        loss = self.loss(predictions, y)
+        
+        loss = self.training_logic(batch, batch_idx)
+        loss = self.print_log_loss(loss, step_name)
+        
+        return loss
+
+    def print_log_loss(self, loss, step_name):
         if isinstance(loss, dict):
             # append step name to loss keys for logging
             loss = {f"{step_name}/{k}": v for k, v in loss.items()}
@@ -153,9 +163,8 @@ class NowcastingLightningModule(L.LightningModule):
                 raise ValueError(f"Loss is None for step {step_name}. Ensure loss function returns a valid tensor.")
         else:
             self.log(f"{step_name}/loss", loss.item(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        
         return loss
-
+    
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         """Training step for a single batch.
 
