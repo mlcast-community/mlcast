@@ -96,12 +96,25 @@ trainer = L.Trainer()
 trainer.fit(ldm_lightning, dataloader)
 ```
 
-The original weights can not be directly loaded because the models are structured a little differently, but the original weights can be loaded with
+The original weights can not be directly loaded because the models are structured a little differently, but the original weights files can be converted with
 ```python
+from src.mlcast.models.ldcast.original_weights import convert_original_weights
 ldm_weights_fn = '/path/to/original/ldm/genforecast/weights'
-unexpected_keys = ldm_lightning.load_original_weights(ldm_weights_fn)
+state_dict = convert_original_weights(ldm_weights_fn)
+torch.save(state_dict['denoiser_state_dict'], 'denoiser.pt')
+torch.save(state_dict['conditioner_state_dict'], 'conditioner.pt')
 ```
-`unexpected_keys` contains the keys that were not loaded (only the ema weights because I did not take care of the ema scope for the moment)
+`state_dict['unmatched']` contains a `dict` with the elements that were not matched (only the ema weights because I did not take care of the ema scope for the moment, and the buffer keys for the scheduling). The weights for the conditioner and the denoiser can then be loaded with
+```python
+conditioner.load_state_dict(torch.load('conditioner_state_dict.pt'))
+denoiser.load_state_dict(torch.load('denoiser_state_dict.pt'))
+```
+One can check that the buffers have the same values with
+```python
+from src.mlcast.models.ldcast.original_weights import check_saved_buffers
+unmatched = check_saved_buffers(state_dict['unmatched'], ldm)
+```
+Here, `unmatched` contains the element which have not been matched (only the ema weights).
 
 # Main LDCast class
 
@@ -109,10 +122,16 @@ unexpected_keys = ldm_lightning.load_original_weights(ldm_weights_fn)
 from src.mlcast.models.ldcast.ldcast import LDCast
 ldcast = LDCast(ldm_lightning, autoencoder)
 ```
+To load from a folder containing in different files the weights of the autoencoder, of the denoiser and of the conditioner (and possibly ema weights):
+```python
+ldcast.load('/path/to/folder')
+```
+To save in a folder:
+```python
+ldcast.save('/path/to/folder')
+```
 
 # TO DO
-
-During training, an EMA scope was used for the weights of the denoiser, I removed this for the moment, but it should reincluded in some way.
 
 The 'timesteps' variable sometimes refers to the timesteps of the diffusion process (= 1000 during training) and sometimes refers to the nowcasting timesteps (where each time step = 5 minutes). Better to have different names.
 

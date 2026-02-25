@@ -4,6 +4,7 @@ from src.mlcast.models.base import NowcastingModelBase
 import pytorch_lightning as L
 from src.mlcast.models.ldcast.data import LatentDataset
 from torch.utils.data import DataLoader
+import torch
 
 
 class LDCast(NowcastingModelBase):
@@ -31,14 +32,27 @@ class LDCast(NowcastingModelBase):
     def fit_autoencoder(self, dataset):
         pass
 
-    def load(self):
-        pass
     def predict(self, inputs):
         '''inputs.shape = (batch_size, 1, 4, 256, 256)'''
         latent_inputs = self.autoencoder.net.encode(inputs)
         latent_pred = self.ldm_lightning(latent_inputs)
         return self.autoencoder.net.decode(latent_pred)
         
-    def save(self):
-        pass
+    def save(self, folder):
+        torch.save(self.autoencoder.net.state_dict(), f'{folder}/autoencoder.pt')
+        torch.save(self.ldm_lightning.net.conditioner.state_dict(), f'{folder}/conditioner.pt')
+        torch.save(self.ldm_lightning.net.denoiser.state_dict(), f'{folder}/denoiser.pt')
+
+        if hasattr(self.ldm_lightning, 'ema'):
+            torch.save(self.ldm_lightning.ema.shadow, f'{folder}/ema.pt')
+
+    def load(self, folder):
+        self.autoencoder.net.load_state_dict(torch.load(f'{folder}/autoencoder.pt'))
+        self.ldm_lightning.net.conditioner.load_state_dict(torch.load(f'{folder}/conditioner.pt'))
+        self.ldm_lightning.net.denoiser.load_state_dict(torch.load(f'{folder}/denoiser.pt'))
+
+        if hasattr(self.ldm_lightning, 'ema'):
+            self.ldm_lightning.ema.shadow = torch.load(f'{folder}/ema.pt')
+        
+        
     
