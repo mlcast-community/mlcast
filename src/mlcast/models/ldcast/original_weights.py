@@ -1,4 +1,5 @@
 import torch
+import re
 
 def convert_original_weights(ldm_weights_fn):
     '''
@@ -23,6 +24,12 @@ def convert_original_weights(ldm_weights_fn):
             new_key = k.replace('model.', '')
             denoiser_state_dict[new_key] = ldm_state_dict[k]
             unmatched_keys.remove(k)
+
+    denoiser_buffers_keys = ['betas', 'alphas_cumprod', 'alphas_cumprod_prev', 'sqrt_alphas_cumprod', 'sqrt_one_minus_alphas_cumprod']
+    for k in unmatched_keys.copy():
+        if k in denoiser_buffers_keys:
+            denoiser_state_dict[k] = ldm_state_dict[k]
+            unmatched_keys.remove(k)
     
     # extract the keys of the conditioner (it was called 'context_encoder' in the original code)
     conditioner_state_dict = {}
@@ -32,7 +39,7 @@ def convert_original_weights(ldm_weights_fn):
                 conditioner_state_dict[new_key] = ldm_state_dict[k]
                 unmatched_keys.remove(k)
 
-    # proj, temporal_transformer and analysis were lists one only element, I simplified this
+    # proj, temporal_transformer and analysis were lists with one only element, I simplified this
     # the keys have to be adapted
     new_conditioner_state_dict = {}
     for k, v in conditioner_state_dict.items():
@@ -46,27 +53,37 @@ def convert_original_weights(ldm_weights_fn):
         new_conditioner_state_dict[new_key] = v
     conditioner_state_dict = new_conditioner_state_dict
 
+    ema = {}
+    for k in unmatched_keys.copy():
+        if k.startswith('model_ema.'):
+            new_key = restore_name(k.replace('model_ema.', ''))
+            ema[new_key] = ldm_state_dict[k]
+            unmatched_keys.remove(k)
+    
     # create dict with unmatched keys
     unmatched = {key: ldm_state_dict[key] for key in unmatched_keys}
     
-    return {'denoiser_state_dict': denoiser_state_dict,
-            'conditioner_state_dict': conditioner_state_dict,
+    return {'denoiser': denoiser_state_dict,
+            'conditioner': conditioner_state_dict,
+            'ema': ema,
             'unmatched': unmatched}
 
-def check_saved_buffers(d, ldm):
-    '''
-    checks that the buffers saved in ldm are the same than the ones in d (which is a dict containing these values)
-    returns the unmatched elements in d
-    '''
-
-    unmatched_keys = list(d.keys())
-    
-    for buffer in ldm.named_buffers():
-        name, value = buffer
-        assert (value == d[name].to(value.device)).all()
-        unmatched_keys.remove(name)
-
-    # create dict with unmatched keys
-    unmatched = {key: d[key] for key in unmatched_keys}
-    
-    return unmatched
+def restore_name(s):
+    '''for the EMA, all the dots were removed from the parameters names in the original code, so they should be added again to match during swapping'''
+    # add dots before and after every digit
+    res = re.sub(r'(\d)', r'.\1.', s)
+    # if the digit was in 'fc1', 'fc2', it should not be preceded by a dot
+    res = res.replace('fc.1', 'fc1')
+    res = res.replace('fc.2', 'fc2')
+    # same, but there should be in addition a dot before w1, w2, b1 and b2
+    res = res.replace('w.1.', '.w1')
+    res = res.replace('w.2.', '.w2')
+    res = res.replace('b.1.', '.b1')
+    res = res.replace('b.2.', '.b2')
+    # add a dot before each 'weights' and each 'bias'
+    res = res.replace('weight', '.weight').replace('bias', '.bias')
+    # add dot after mlp
+    res = res.replace('mlp', 'mlp.')
+    # if two dots are inserted, replace them by one (happens if two digits follow each other, or if a digit is followed by b or w)
+    res = res.replace('..', '.')
+    return res

@@ -136,6 +136,7 @@ class NowcastingLightningModule(L.LightningModule):
         x, y = batch
         predictions = self.forward(x, n_timesteps = 4)
         loss = self.loss(predictions, y)
+        return loss
     
     def model_step(self, batch: Any, batch_idx: int, step_name: str = "train") -> torch.Tensor:
         """Generic model step for training or validation.

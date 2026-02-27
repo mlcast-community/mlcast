@@ -1,40 +1,71 @@
 # new file with respect to original code
 
-from src.mlcast.models.base import NowcastingModelBase
+from ..base import NowcastingModelBase
 import pytorch_lightning as L
-from src.mlcast.models.ldcast.data import LatentDataset
+from .data import LatentDataset
 from torch.utils.data import DataLoader
 import torch
+import contextlib
+from torch.utils.data import TensorDataset
 
 
 class LDCast(NowcastingModelBase):
-    def __init__(self, ldm_lightning, autoencoder):
+    def __init__(self, ldm_lightning, autoencoder, sampler):
         super().__init__()
         self.ldm_lightning = ldm_lightning
         self.autoencoder = autoencoder
+        self.sampler = sampler
     
-    def fit(self, dataset):
+    def fit(self, inputs, true, batch_size, max_epochs):
         '''dataset should contains pairs of (inputs, true), with
         inputs.shape = (batch_size, 1, 4, 256, 256)
         true.shape = (batch_size, 1, 20, 256, 256)
         '''
-        self.fit_autoencoder(dataset)
-        self.fit_ldm(dataset)
+        print('Training autoencoder')
+        self.fit_autoencoder(inputs, batch_size, max_epochs)
 
-    def fit_ldm(self, dataset):
+        print('Training ldm')
+        self.fit_ldm(inputs, true, batch_size, max_epochs)
+
+    def fit_ldm(self, inputs, true, batch_size, max_epochs):
         self.autoencoder.net.eval()
+        self.ldm_lightning.net.train()
 
+        dataset = TensorDataset(inputs, true)
         latent_dataset = LatentDataset(dataset, self.autoencoder.net)
-        dataloader = DataLoader(latent_dataset, batch_size=2)
-        trainer = L.Trainer()
+        dataloader = DataLoader(latent_dataset, batch_size = batch_size)
+        trainer = L.Trainer(max_epochs = max_epochs)
         trainer.fit(self.ldm_lightning, dataloader)
     
-    def fit_autoencoder(self, dataset):
-        pass
+    def fit_autoencoder(self, inputs, batch_size, max_epochs):
+        self.autoencoder.net.train()
 
-    def predict(self, inputs):
+        dataset = TensorDataset(inputs, inputs)
+        dataloader = DataLoader(dataset, batch_size = batch_size)
+        trainer = L.Trainer(max_epochs = max_epochs)
+        trainer.fit(self.autoencoder, dataloader)
+
+    def predict(self, inputs, num_diffusion_iters = 50, verbose = True):
         '''inputs.shape = (batch_size, 1, 4, 256, 256)'''
+
+        assert False, 'prediction should be implemented with a trainer, to take into account the switches of ema weights for example'''
+        
         latent_inputs = self.autoencoder.net.encode(inputs)
+        condition = self.ldm_lightning.net.conditioner(latent_inputs)
+
+        gen_shape = (32, 5, 256//4, 256//4)
+        batch_size = len(latent_inputs)
+
+        with contextlib.redirect_stdout(None):
+            (s, intermediates) = self.sampler.sample(
+                num_diffusion_iters, 
+                batch_size,
+                gen_shape,
+                condition,
+                progbar = verbose)
+
+        return s
+        
         latent_pred = self.ldm_lightning(latent_inputs)
         return self.autoencoder.net.decode(latent_pred)
         
@@ -44,7 +75,7 @@ class LDCast(NowcastingModelBase):
         torch.save(self.ldm_lightning.net.denoiser.state_dict(), f'{folder}/denoiser.pt')
 
         if hasattr(self.ldm_lightning, 'ema'):
-            torch.save(self.ldm_lightning.ema.shadow, f'{folder}/ema.pt')
+            self.ldm_lightning.ema.save(f'{folder}/ema.pt')
 
     def load(self, folder):
         self.autoencoder.net.load_state_dict(torch.load(f'{folder}/autoencoder.pt'))
@@ -52,7 +83,36 @@ class LDCast(NowcastingModelBase):
         self.ldm_lightning.net.denoiser.load_state_dict(torch.load(f'{folder}/denoiser.pt'))
 
         if hasattr(self.ldm_lightning, 'ema'):
-            self.ldm_lightning.ema.shadow = torch.load(f'{folder}/ema.pt')
+            self.ldm_lightning.ema.load(f'{folder}/ema.pt')
+
+    @classmethod
+    def from_config(cls, config):
+        
+        if isinstance(config, str):
+            import yaml
+            with open(config, 'r') as file:
+                config = yaml.safe_load(file)
+        
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        
+        from .autoenc.autoenc import AutoencoderKLNet, autoenc_loss
+        from ..base import NowcastingLightningModule
+        from .diffusion.unet import UNetModel
+        from .context.context import AFNONowcastNetCascade
+        from .diffusion.diffusion import LatentDiffusion, LatentDiffusionLightning
+        from torch.nn import L1Loss
+        from .diffusion.scheduler import Scheduler
+        from .diffusion.plms import PLMSSampler
+        
+        autoencoder = NowcastingLightningModule(AutoencoderKLNet(), autoenc_loss()).to(device)
+        conditioner = AFNONowcastNetCascade(**config['conditioner']).to(device)
+        denoiser = UNetModel(**config['denoiser']).to(device)
+        ldm = LatentDiffusion(conditioner, denoiser)
+        ldm_lightning = LatentDiffusionLightning(ldm, L1Loss(), Scheduler())
+        sampler = PLMSSampler(denoiser)
+        
+        return cls(ldm_lightning, autoencoder, sampler)
+
         
         
     

@@ -1,5 +1,5 @@
 from functools import partial
-from src.mlcast.models.ldcast.diffusion.utils import make_beta_schedule
+from .utils import make_beta_schedule
 import numpy as np
 import torch
 

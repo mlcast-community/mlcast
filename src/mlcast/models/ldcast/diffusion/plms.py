@@ -15,7 +15,7 @@ from .utils import make_ddim_sampling_parameters, make_ddim_timesteps, noise_lik
 
 
 class PLMSSampler:
-    def __init__(self, model, timesteps, schedule="linear", **kwargs):
+    def __init__(self, model, timesteps = 1000, schedule = "linear", **kwargs):
         self.model = model
         self.ddpm_num_timesteps = timesteps
         self.schedule = schedule

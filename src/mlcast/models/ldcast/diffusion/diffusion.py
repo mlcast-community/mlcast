@@ -3,9 +3,9 @@ import torch.nn as nn
 import pytorch_lightning as L
 from typing import Any
 import contextlib
-from src.mlcast.models.base import NowcastingLightningModule
+from ...base import NowcastingLightningModule
 import numpy as np
-from src.mlcast.models.ldcast.diffusion.utils import extract_into_tensor
+from .utils import extract_into_tensor
 from .ema import EMA 
 
 class LatentDiffusion(nn.Module):
@@ -49,10 +49,10 @@ class LatentDiffusionLightning(NowcastingLightningModule):
                                        if (name in saved_buffers.keys() and (schedule[name] != saved_buffers[name]).any())
                                       ]
         if len(already_saved_and_different) > 0:
-            raise AttributeError(f'The denoiser has already some different values for {already_saved}')
+            raise AttributeError(f'The denoiser has already some different values for {already_saved_and_different}')
         
         for k in schedule.keys():
-            self.net.register_buffer(k, schedule[k])
+            self.net.denoiser.register_buffer(k, schedule[k])
     
     def training_logic(self, batch, batch_idx):
         latent_inputs, latent_true = batch

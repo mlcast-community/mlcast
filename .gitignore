@@ -4,3 +4,7 @@ __pycache__/
 build/
 dist/
 .venv/
+.ipynb_checkpoints/
+src/mlcast/modules/.ipynb_checkpoints/
+src/mlcast/models/ldcast/context/.ipynb_checkpoints/
+src/mlcast/models/ldcast/diffusion/.ipynb_checkpoints/

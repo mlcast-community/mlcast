@@ -41,6 +41,9 @@ autoencoder.net.load_state_dict(torch.load(autoenc_weights_fn))
 # Latent diffusion (= conditioner + denoiser)
 The `LatentDiffusion` class is a `nn.Module` combining the conditioner and the denoiser.
 ```python
+from src.mlcast.models.ldcast.diffusion.unet import UNetModel
+from src.mlcast.models.ldcast.context.context import AFNONowcastNetCascade
+
 # setup forecaster
 conditioner = AFNONowcastNetCascade(
     32,
@@ -73,6 +76,8 @@ ldm((t, noise, latent_inputs))
 ```
 The noise has to have the shape true radar images encoded in latent space.
 
+## LatentDiffusionLightning class and training of the ldm
+
 Create fake data to train the ldm:
 ```python
 from torch.utils.data import TensorDataset
@@ -95,32 +100,38 @@ ldm_lightning = LatentDiffusionLightning(ldm, L1Loss(), Scheduler())
 trainer = L.Trainer()
 trainer.fit(ldm_lightning, dataloader)
 ```
-
+## Loading the original weights
 The original weights can not be directly loaded because the models are structured a little differently, but the original weights files can be converted with
 ```python
 from src.mlcast.models.ldcast.original_weights import convert_original_weights
 ldm_weights_fn = '/path/to/original/ldm/genforecast/weights'
 state_dict = convert_original_weights(ldm_weights_fn)
-torch.save(state_dict['denoiser_state_dict'], 'denoiser.pt')
-torch.save(state_dict['conditioner_state_dict'], 'conditioner.pt')
+torch.save(state_dict['denoiser'], 'denoiser_state_dict.pt')
+torch.save(state_dict['conditioner'], 'conditioner_state_dict.pt')
+torch.save(state_dict['ema'], 'ema.pt')
 ```
-`state_dict['unmatched']` contains a `dict` with the elements that were not matched (only the ema weights because I did not take care of the ema scope for the moment, and the buffer keys for the scheduling). The weights for the conditioner and the denoiser can then be loaded with
+`state_dict['unmatched']` contains a `dict` with the elements that were not matched (should be empty). The weights for the conditioner and the denoiser (including the buffers for the scheduling) can then be loaded with
 ```python
 conditioner.load_state_dict(torch.load('conditioner_state_dict.pt'))
 denoiser.load_state_dict(torch.load('denoiser_state_dict.pt'))
 ```
-One can check that the buffers have the same values with
+The EMA weights and parameters can be loaded with
 ```python
-from src.mlcast.models.ldcast.original_weights import check_saved_buffers
-unmatched = check_saved_buffers(state_dict['unmatched'], ldm)
+ldm_lighting.ema.load('ema.pt')
 ```
-Here, `unmatched` contains the element which have not been matched (only the ema weights).
 
 # Main LDCast class
 
 ```python
 from src.mlcast.models.ldcast.ldcast import LDCast
-ldcast = LDCast(ldm_lightning, autoencoder)
+from src.mlcast.models.ldcast.diffusion.plms import PLMSSampler
+sampler = PLMSSampler(denoiser)
+ldcast = LDCast(ldm_lightning, autoencoder, sampler)
+```
+Predictions can be produced with
+```python
+inputs = torch.randn(2, 1, 4, 256, 256, device = 'cuda')
+ldcast.predict(inputs)
 ```
 To load from a folder containing in different files the weights of the autoencoder, of the denoiser and of the conditioner (and possibly ema weights):
 ```python
@@ -130,16 +141,22 @@ To save in a folder:
 ```python
 ldcast.save('/path/to/folder')
 ```
+The original config for the conditioner and the autoencoder is in `original_config.yaml`, and can be laoded with:
+```python
+config = 'original_config'
+ldcast = LDCast.from_config(config)
+```
+Here, `config` can also be a `dict`.
 
 # TO DO
 
 The 'timesteps' variable sometimes refers to the timesteps of the diffusion process (= 1000 during training) and sometimes refers to the nowcasting timesteps (where each time step = 5 minutes). Better to have different names.
 
-I have understood that samplers are only used in inference ! The training (and validation) step is always done by predicting the noise (or a quantity which is related to it by a simple formula). What I called previously the SimpleSampler is actually simply a scheduler (which determines the values of alphas and betas, and add the noise on the latent samples during training)
-
 We might integrate this code within the Hugging Face Diffusers Library.
 
 It remains mainly to write code in the main LDCast class (in `ldcast.py`)
+
+It would be nice to rewrite the PLMS sampler, it is a little messy
 
 # Basics on diffusion models
 

@@ -58,7 +58,6 @@ class AFNONowcastNetBase(nn.Module):
         input_patches=1,
         input_size_ratios=1,
         output_patches=2,
-        train_autoenc=False,
         afno_fusion=False
     ):
         super().__init__()

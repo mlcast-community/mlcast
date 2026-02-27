@@ -6,7 +6,7 @@ In the original code, EMA was a subclass of nn.Module, in order to register the 
 import torch
 from torch import nn
 
-class EMA(nn.Module):
+class EMA():
     def __init__(self, model, decay=0.9999, use_num_updates=True):
         super().__init__()
         if decay < 0.0 or decay > 1.0:
@@ -52,3 +52,18 @@ class EMA(nn.Module):
         for name, param in self.model.named_parameters():
             if param.requires_grad:
                 param.data = self.backup[name]
+
+    def load(self, filename):
+        '''load the ema (shadow) weights parameters'''
+        self.shadow = torch.load(filename)
+        self.decay = self.shadow.pop('decay')
+        self.num_updates = self.shadow.pop('num_updates')
+
+    def save(self, filename):
+        '''save the ema (shadow) weights parameters'''
+        self.shadow['decay'] = self.decay
+        self.shadow['num_updates'] = self.num_updates
+        torch.save(self.shadow, filename)
+
+        self.shadow.pop('decay')
+        self.shadow.pop('num_updates')
