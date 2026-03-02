@@ -11,8 +11,8 @@ Here, 4 consecutive radar images are encoded at once.
 # Autoencoder
 
 ```python
-from src.mlcast.models.ldcast.autoenc.autoenc import AutoencoderKLNet, autoenc_loss
-from src.mlcast.models.base import NowcastingLightningModule
+from mlcast.models.ldcast.autoenc.autoenc import AutoencoderKLNet, autoenc_loss
+from mlcast.models.base import NowcastingLightningModule
 autoencoder = NowcastingLightningModule(AutoencoderKLNet(), autoenc_loss()).to('cuda')
 ```
 The autoencoder is an instance of the NowcastingLightningModule. Training the autoencoder:
@@ -41,8 +41,8 @@ autoencoder.net.load_state_dict(torch.load(autoenc_weights_fn))
 # Latent diffusion (= conditioner + denoiser)
 The `LatentDiffusion` class is a `nn.Module` combining the conditioner and the denoiser.
 ```python
-from src.mlcast.models.ldcast.diffusion.unet import UNetModel
-from src.mlcast.models.ldcast.context.context import AFNONowcastNetCascade
+from mlcast.models.ldcast.diffusion.unet import UNetModel
+from mlcast.models.ldcast.context.context import AFNONowcastNetCascade
 
 # setup forecaster
 conditioner = AFNONowcastNetCascade(
@@ -55,7 +55,7 @@ conditioner = AFNONowcastNetCascade(
 ).to('cuda')
 
 # setup denoiser
-from src.mlcast.models.ldcast.diffusion.unet import UNetModel
+from mlcast.models.ldcast.diffusion.unet import UNetModel
 denoiser = UNetModel(in_channels=autoencoder.net.hidden_width,
     model_channels=256, out_channels=autoencoder.net.hidden_width,
     num_res_blocks=2, attention_resolutions=(1,2), 
@@ -64,7 +64,7 @@ denoiser = UNetModel(in_channels=autoencoder.net.hidden_width,
     context_ch=[128, 256, 512] # context channels (= analysis_net.cascade_dims)
                     ).to('cuda')
 
-from src.mlcast.models.ldcast.diffusion.diffusion import LatentDiffusion
+from mlcast.models.ldcast.diffusion.diffusion import LatentDiffusion
 ldm = LatentDiffusion(conditioner, denoiser)
 ```
 The `LatentDiffusion` class has a forward pass: it takes the noise, the timesteps of the diffusion and the encoded inputs
@@ -93,8 +93,8 @@ dataloader = DataLoader(latent_dataset, batch_size=2)
 Put `ldm` in a `LightningModule` and train:
 ```python
 from torch.nn import L1Loss
-from src.mlcast.models.ldcast.diffusion.scheduler import Scheduler
-from src.mlcast.models.ldcast.diffusion.diffusion import LatentDiffusionLightning
+from mlcast.models.ldcast.diffusion.scheduler import Scheduler
+from mlcast.models.ldcast.diffusion.diffusion import LatentDiffusionLightning
 
 ldm_lightning = LatentDiffusionLightning(ldm, L1Loss(), Scheduler())
 trainer = L.Trainer()
@@ -103,7 +103,7 @@ trainer.fit(ldm_lightning, dataloader)
 ## Loading the original weights
 The original weights can not be directly loaded because the models are structured a little differently, but the original weights files can be converted with
 ```python
-from src.mlcast.models.ldcast.original_weights import convert_original_weights
+from mlcast.models.ldcast.original_weights import convert_original_weights
 ldm_weights_fn = '/path/to/original/ldm/genforecast/weights'
 state_dict = convert_original_weights(ldm_weights_fn)
 torch.save(state_dict['denoiser'], 'denoiser_state_dict.pt')
@@ -123,8 +123,8 @@ ldm_lighting.ema.load('ema.pt')
 # Main LDCast class
 
 ```python
-from src.mlcast.models.ldcast.ldcast import LDCast
-from src.mlcast.models.ldcast.diffusion.plms import PLMSSampler
+from mlcast.models.ldcast.ldcast import LDCast
+from mlcast.models.ldcast.diffusion.plms import PLMSSampler
 sampler = PLMSSampler(denoiser)
 ldcast = LDCast(ldm_lightning, autoencoder, sampler)
 ```

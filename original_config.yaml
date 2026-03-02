@@ -18,4 +18,9 @@ denoiser:
     num_heads: 8
     num_timesteps: *output_patches
     context_ch: [128, 256, 512] # should be equal to conditioner.cascade_dims ?
+
+ema:
+    use: True
+    kwargs:
+        store_device: 'cpu'
     

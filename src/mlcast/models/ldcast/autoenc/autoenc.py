@@ -54,6 +54,9 @@ class AutoencoderKLNet(pl.LightningModule):
         if return_log_var:
             return (mean, log_var)
         else:
+            # if the first axis has length 1, it is the batch dimension and should be removed
+            if mean.shape[0] == 1:
+                mean = mean[0]
             return mean
 
     def decode(self, z):

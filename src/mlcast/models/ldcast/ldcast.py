@@ -2,7 +2,7 @@
 
 from ..base import NowcastingModelBase
 import pytorch_lightning as L
-from .data import LatentDataset
+from .data import LatentDataset, AutoencoderDataset, DataModule
 from torch.utils.data import DataLoader
 import torch
 import contextlib
@@ -16,34 +16,33 @@ class LDCast(NowcastingModelBase):
         self.autoencoder = autoencoder
         self.sampler = sampler
     
-    def fit(self, inputs, true, batch_size, max_epochs):
+    def fit(self, sampled_radar_dataset, dataloader_kwargs = {}, trainer_kwargs = {}):
         '''dataset should contains pairs of (inputs, true), with
         inputs.shape = (batch_size, 1, 4, 256, 256)
         true.shape = (batch_size, 1, 20, 256, 256)
         '''
         print('Training autoencoder')
-        self.fit_autoencoder(inputs, batch_size, max_epochs)
+        self.fit_autoencoder(sampled_radar_dataset, dataloader_kwargs = dataloader_kwargs, trainer_kwargs = trainer_kwargs)
 
         print('Training ldm')
-        self.fit_ldm(inputs, true, batch_size, max_epochs)
+        self.fit_ldm(sampled_radar_dataset, dataloader_kwargs = dataloader_kwargs, trainer_kwargs = trainer_kwargs)
 
-    def fit_ldm(self, inputs, true, batch_size, max_epochs):
+    def fit_ldm(self, sampled_radar_dataset, dataloader_kwargs = {}, trainer_kwargs = {}):
         self.autoencoder.net.eval()
         self.ldm_lightning.net.train()
 
-        dataset = TensorDataset(inputs, true)
-        latent_dataset = LatentDataset(dataset, self.autoencoder.net)
-        dataloader = DataLoader(latent_dataset, batch_size = batch_size)
-        trainer = L.Trainer(max_epochs = max_epochs)
-        trainer.fit(self.ldm_lightning, dataloader)
+        dataset = LatentDataset(sampled_radar_dataset, self.autoencoder.net)
+        datamodule = DataModule(dataset, **dataloader_kwargs)
+        trainer = L.Trainer(**trainer_kwargs)
+        trainer.fit(self.ldm_lightning, datamodule)
     
-    def fit_autoencoder(self, inputs, batch_size, max_epochs):
+    def fit_autoencoder(self, sampled_radar_dataset, dataloader_kwargs = {}, trainer_kwargs = {}):
         self.autoencoder.net.train()
 
-        dataset = TensorDataset(inputs, inputs)
-        dataloader = DataLoader(dataset, batch_size = batch_size)
-        trainer = L.Trainer(max_epochs = max_epochs)
-        trainer.fit(self.autoencoder, dataloader)
+        dataset = AutoencoderDataset(sampled_radar_dataset)
+        datamodule = DataModule(dataset, **dataloader_kwargs)
+        trainer = L.Trainer(**trainer_kwargs)
+        trainer.fit(self.autoencoder, datamodule)
 
     def predict(self, inputs, num_diffusion_iters = 50, verbose = True):
         '''inputs.shape = (batch_size, 1, 4, 256, 256)'''
@@ -108,7 +107,7 @@ class LDCast(NowcastingModelBase):
         conditioner = AFNONowcastNetCascade(**config['conditioner']).to(device)
         denoiser = UNetModel(**config['denoiser']).to(device)
         ldm = LatentDiffusion(conditioner, denoiser)
-        ldm_lightning = LatentDiffusionLightning(ldm, L1Loss(), Scheduler())
+        ldm_lightning = LatentDiffusionLightning(ldm, L1Loss(), Scheduler(), ema_config = config['ema'])
         sampler = PLMSSampler(denoiser)
         
         return cls(ldm_lightning, autoencoder, sampler)

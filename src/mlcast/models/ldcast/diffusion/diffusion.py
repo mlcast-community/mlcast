@@ -29,16 +29,16 @@ class LatentDiffusion(nn.Module):
 
 
 class LatentDiffusionLightning(NowcastingLightningModule):
-    def __init__(self, ldm, loss, scheduler, use_ema = True):
+    def __init__(self, ldm, loss, scheduler, ema_config = {'use': True}):
         super().__init__(ldm, loss)
         self.scheduler = scheduler
 
         # register the schedules (i.e. the values of alpha, beta etc).
         self.register_schedule()
 
-        if use_ema:
-            self.ema = EMA(self.net.denoiser)
-
+        if ema_config['use']:
+            self.ema = EMA(self.net.denoiser, **ema_config['kwargs'])
+            
     def register_schedule(self):
         
         schedule = self.scheduler.schedule(torch.float32, next(self.net.parameters()).device)
@@ -76,28 +76,35 @@ class LatentDiffusionLightning(NowcastingLightningModule):
         if t is None:
             t = torch.randint(0, self.scheduler.timesteps, (x0.shape[0],), device=x0.device).long()
         
-        x_noisy = extract_into_tensor(self.net.sqrt_alphas_cumprod, t, x0.shape) * x0 + \
-            extract_into_tensor(self.net.sqrt_one_minus_alphas_cumprod, t, x0.shape) * noise
+        x_noisy = extract_into_tensor(self.net.denoiser.sqrt_alphas_cumprod, t, x0.shape) * x0 + \
+            extract_into_tensor(self.net.denoiser.sqrt_one_minus_alphas_cumprod, t, x0.shape) * noise
         
         return t, noise, x_noisy
 
-    def on_train_batch_end(self, outputs, batch, batch_idx, dataloader_idx):
-        self.ema.update()
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if hasattr(self, 'ema'):
+            self.ema.update()
 
     def on_validation_start(self):
-        self.ema.apply_shadow()
+        if hasattr(self, 'ema'):
+            self.ema.apply_shadow()
 
     def on_validation_end(self):
-        self.ema.restore()
+        if hasattr(self, 'ema'):
+            self.ema.restore()
 
     def on_test_start(self):
-        self.ema.apply_shadow()
+        if hasattr(self, 'ema'):
+            self.ema.apply_shadow()
 
     def on_test_end(self):
-        self.ema.restore()
+        if hasattr(self, 'ema'):
+            self.ema.restore()
     
     def on_predict_start(self):
-        self.ema.apply_shadow()
+        if hasattr(self, 'ema'):
+            self.ema.apply_shadow()
 
     def on_predict_end(self):
-        self.ema.restore()
+        if hasattr(self, 'ema'):
+            self.ema.restore()

@@ -7,16 +7,18 @@ import torch
 from torch import nn
 
 class EMA():
-    def __init__(self, model, decay=0.9999, use_num_updates=True):
+    def __init__(self, model, decay = 0.9999, use_num_updates = True, store_device = 'cuda'):
         super().__init__()
         if decay < 0.0 or decay > 1.0:
             raise ValueError('Decay must be between 0 and 1')
 
         self.model = model
         self.decay = decay
-        self.shadow = {}                                  # to store EMA weights
-        self.backup = {}                                  # to store the model weights when we replace them by ema weights
-        self.num_updates = 0 if use_num_updates else -1   # for dynamical decay
+        self.shadow = {}                                       # to store EMA weights
+        self.backup = {}                                       # to store the model weights when we replace them by ema weights
+        self.num_updates = 0 if use_num_updates else -1        # for dynamical decay
+        self.store_device = store_device                       # device on which to store the weights
+        self.model_device = next(model.parameters()).device    # device on which the weights are used
 
         self.register()
         
@@ -24,7 +26,7 @@ class EMA():
         '''initialize the ema weights with the model weights'''
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                self.shadow[name] = param.data.clone()
+                self.shadow[name] = param.data.clone().detach().to(self.store_device)
 
     def update(self):
         '''update the shadow parameters'''
@@ -37,27 +39,31 @@ class EMA():
             
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                new_average = (1.0 - self.decay) * param.data + self.decay * self.shadow[name]
-                self.shadow[name] = new_average.clone()
+                new_average = (1.0 - self.decay) * param.data.detach().to(self.store_device) + self.decay * self.shadow[name]
+                self.shadow[name] = new_average
 
     def apply_shadow(self):
         '''apply shadow (EMA) weights to the model'''
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                self.backup[name] = param.data.clone()
-                param.data = self.shadow[name]
+                self.backup[name] = param.data.clone().detach().to(self.store_device)
+                param.data = self.shadow[name].to(self.model_device)
 
     def restore(self):
         '''restore original model weights from backup'''
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                param.data = self.backup[name]
+                param.data = self.backup[name].to(self.model_device)
 
     def load(self, filename):
         '''load the ema (shadow) weights parameters'''
         self.shadow = torch.load(filename)
         self.decay = self.shadow.pop('decay')
         self.num_updates = self.shadow.pop('num_updates')
+
+        # put the shadow tensors on the correct device
+        for k in self.shadow.keys():
+            self.shadow[k] = self.shadow[k].to(self.store_device)
 
     def save(self, filename):
         '''save the ema (shadow) weights parameters'''
