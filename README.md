@@ -8,6 +8,49 @@ autoenc_time_ratio = 4 # number of timesteps encoded in the autoencoder
 ```
 Here, 4 consecutive radar images are encoded at once.
 
+# Main LDCast class
+
+```python
+from mlcast.models.ldcast.ldcast import LDCast
+from mlcast.models.ldcast.diffusion.plms import PLMSSampler
+sampler = PLMSSampler(denoiser)
+ldcast = LDCast(ldm_lightning, autoencoder, sampler)
+```
+The original config for the conditioner and the autoencoder is in `original_config.yaml`, and can be laoded with:
+```python
+config = 'original_config'
+ldcast = LDCast.from_config(config)
+```
+Here, `config` can also be a `dict`.
+## Predictions
+
+Predictions can be produced with
+```python
+inputs = torch.randn(2, 1, 4, 256, 256, device = 'cuda')
+ldcast.predict(inputs)
+```
+
+## Loading/saving weights
+To load from a folder containing in different files the weights of the autoencoder, of the denoiser and of the conditioner (and possibly ema weights):
+```python
+ldcast.load('/path/to/folder')
+```
+To save in a folder:
+```python
+ldcast.save('/path/to/folder')
+```
+## Training
+
+If `sampled_radar_dataset` is a `SampledRadarDataset` built with Gabriele's code (https://github.com/DSIP-FBK/ConvGRU-Ensemble/blob/main/convgru_ensemble/datamodule.py), the autoencoder can be trained with
+```python
+ldcast.fit_autoencoder(sampled_radar_dataset)
+```
+and the ldm can be trained
+```python
+ldcast.fit_ldm(sampled_radar_dataset)
+```
+Keyword arguments can be passed to the trainer and the dataloader through the `trainer_kwargs` and `dataloader_kwargs` keywords.
+
 # Autoencoder
 
 ```python
@@ -119,34 +162,6 @@ The EMA weights and parameters can be loaded with
 ```python
 ldm_lighting.ema.load('ema.pt')
 ```
-
-# Main LDCast class
-
-```python
-from mlcast.models.ldcast.ldcast import LDCast
-from mlcast.models.ldcast.diffusion.plms import PLMSSampler
-sampler = PLMSSampler(denoiser)
-ldcast = LDCast(ldm_lightning, autoencoder, sampler)
-```
-Predictions can be produced with
-```python
-inputs = torch.randn(2, 1, 4, 256, 256, device = 'cuda')
-ldcast.predict(inputs)
-```
-To load from a folder containing in different files the weights of the autoencoder, of the denoiser and of the conditioner (and possibly ema weights):
-```python
-ldcast.load('/path/to/folder')
-```
-To save in a folder:
-```python
-ldcast.save('/path/to/folder')
-```
-The original config for the conditioner and the autoencoder is in `original_config.yaml`, and can be laoded with:
-```python
-config = 'original_config'
-ldcast = LDCast.from_config(config)
-```
-Here, `config` can also be a `dict`.
 
 # TO DO
 
