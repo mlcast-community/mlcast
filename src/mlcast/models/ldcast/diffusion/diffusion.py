@@ -1,21 +1,18 @@
 import torch
 import torch.nn as nn
-import pytorch_lightning as L
-from typing import Any
-import contextlib
 from ...base import NowcastingLightningModule
 import numpy as np
 from .utils import extract_into_tensor
-from .ema import EMA 
+from .ema import EMA
 
-class LatentDiffusion(nn.Module):
+class LatentDiffusionNet(nn.Module):
     def __init__(self, conditioner, denoiser, parametrization = "eps"):
         super().__init__()
         self.conditioner = conditioner
         self.denoiser = denoiser
         self.parametrization = parametrization
 
-    def forward(self, x, n_timesteps = 4):
+    def forward(self, x):
         # during training, noisy should be x_t
         # during inference, noisy should be noise
         t, noisy, latent_inputs = x
@@ -28,9 +25,9 @@ class LatentDiffusion(nn.Module):
         return out
 
 
-class LatentDiffusionLightning(NowcastingLightningModule):
-    def __init__(self, ldm, loss, scheduler, ema_config = {'use': True}):
-        super().__init__(ldm, loss)
+class LatentDiffusion(NowcastingLightningModule):
+    def __init__(self, net, loss, scheduler, ema_config = {'use': True}, **kwargs):
+        super().__init__(net, loss, **kwargs)
         self.scheduler = scheduler
 
         # register the schedules (i.e. the values of alpha, beta etc).
@@ -108,3 +105,24 @@ class LatentDiffusionLightning(NowcastingLightningModule):
     def on_predict_end(self):
         if hasattr(self, 'ema'):
             self.ema.restore()
+
+    @classmethod
+    def from_config(cls, config):
+
+        from .scheduler import Scheduler
+        from .unet import UNetModel
+        from ..context.context import AFNONowcastNetCascade
+        
+        conditioner = AFNONowcastNetCascade(**config['conditioner'])
+        denoiser = UNetModel(**config['denoiser'])
+        net = LatentDiffusionNet(conditioner, denoiser)
+        loss = nn.MSELoss()
+        scheduler = Scheduler(**config['scheduler'])
+        
+        return cls(net, loss, scheduler,
+                   ema_config = config['ema'],
+                   optimizer_class = config['optimizer_class'],
+                   optimizer_kwargs = config['optimizer_kwargs'],
+                   lr_scheduler_config = config['lr_scheduler']
+                  ).to(config['device'])
+

@@ -1,9 +1,10 @@
 # from https://github.com/MeteoSwiss/ldcast/blob/master/ldcast/models/autoenc/autoenc.py
 
-import pytorch_lightning as pl
 import torch
 from torch import nn
 from .encoder import SimpleConvEncoder, SimpleConvDecoder
+from ...base import NowcastingLightningModule
+from ..transforms.antialiasing import Antialiaser
 
 from ..distributions import (
     ensemble_nll_normal,
@@ -11,7 +12,7 @@ from ..distributions import (
     sample_from_standard_normal,
 )
 
-class autoenc_loss(nn.Module):
+class AutoencoderLoss(nn.Module):
     def __init__(self, kl_weight = 0.01):
         super().__init__()
         self.kl_weight = kl_weight
@@ -26,13 +27,37 @@ class autoenc_loss(nn.Module):
         
         return {'total_loss': total_loss, 'rec_loss': rec_loss, 'kl_loss': kl_loss}
 
+class Autoencoder(NowcastingLightningModule):
+    def __init__(self, net, loss, antialiaser = Antialiaser(), **kwargs):
+        super().__init__(net, loss, **kwargs)
+        self.antialiaser = antialiaser
 
-class AutoencoderKLNet(pl.LightningModule):
+    def forward(self, x):
+        if self.antialiaser is not None:
+            x = self.antialiaser(x)
+        return self.net(x)
+
+    @classmethod
+    def from_config(cls, config):
+
+        antialiaser = Antialiaser(**config['antialiaser']['kwargs']) if config['antialiaser']['use'] else None
+        encoder = SimpleConvEncoder(**config['encoder'])
+        decoder = SimpleConvDecoder(**config['decoder'])
+        net = AutoencoderKLNet(encoder = encoder, decoder = decoder, **config['net_kwargs'])
+        loss = AutoencoderLoss(**config['loss'])
+        
+        return cls(net, loss,
+                   antialiaser = antialiaser,
+                   optimizer_class = config['optimizer_class'],
+                   optimizer_kwargs = config['optimizer_kwargs'],
+                   lr_scheduler_config = config['lr_scheduler']
+                  ).to(config['device'])
+
+class AutoencoderKLNet(nn.Module):
     def __init__(
         self,
         encoder = SimpleConvEncoder(),
         decoder = SimpleConvDecoder(),
-        kl_weight=0.01,
         encoded_channels=64,
         hidden_width=32,
         **kwargs,
@@ -44,11 +69,11 @@ class AutoencoderKLNet(pl.LightningModule):
         self.to_moments = nn.Conv3d(encoded_channels, 2 * hidden_width, kernel_size=1)
         self.to_decoder = nn.Conv3d(hidden_width, encoded_channels, kernel_size=1)
         self.log_var = nn.Parameter(torch.zeros(size=()))
-        self.kl_weight = kl_weight
 
-    def encode(self, x, return_log_var = False):
+    def encode(self, x, return_log_var = False):        
         if len(x.shape) < 5:
             x = x[None]
+        
         h = self.encoder(x)
         (mean, log_var) = torch.chunk(self.to_moments(h), 2, dim=1)
         if return_log_var:
@@ -64,7 +89,7 @@ class AutoencoderKLNet(pl.LightningModule):
         dec = self.decoder(z)
         return dec
 
-    def forward(self, x, n_timesteps, sample_posterior=True):
+    def forward(self, x, sample_posterior=True):
         (mean, log_var) = self.encode(x, return_log_var = True)
         if sample_posterior:
             z = sample_from_standard_normal(mean, log_var)

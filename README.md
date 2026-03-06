@@ -1,169 +1,25 @@
 # MLCast implementation of LDCast
 
-see main branch https://github.com/mlcast-community/mlcast for details.
+see main branch https://github.com/mlcast-community/mlcast for context.
 
-```python
-future_timesteps = 20
-autoenc_time_ratio = 4 # number of timesteps encoded in the autoencoder
-```
-Here, 4 consecutive radar images are encoded at once.
+## Code structure
 
-# Main LDCast class
+There is one main `LDCast` class, subclassing the `NowcastingModelBase` class. There are three main nets in LDCast:
+ - the autoencoder
+ - the conditioner
+ - the denoiser
 
-```python
-from mlcast.models.ldcast.ldcast import LDCast
-from mlcast.models.ldcast.diffusion.plms import PLMSSampler
-sampler = PLMSSampler(denoiser)
-ldcast = LDCast(ldm_lightning, autoencoder, sampler)
-```
-The original config for the conditioner and the autoencoder is in `original_config.yaml`, and can be laoded with:
-```python
-config = 'original_config'
-ldcast = LDCast.from_config(config)
-```
-Here, `config` can also be a `dict`.
-## Predictions
+The `NowcastingLightningModule` is subclassed by the smaller composites of nets that should be trained at once. This gives two subclasses in this case:
+ - the autoencoder (encoder + decoder) has to be trained on its own, so there is one subclass of `NowcastingLightningModule` called `Autoencoder`
+ - the conditioner and the denoiser have to be trained together, so they are combined into one neural network (the `LatentDiffusionNet` class), whose training is handled by the `LatentDiffusion` subclass of the `NowcastingLightningModule`
 
-Predictions can be produced with
-```python
-inputs = torch.randn(2, 1, 4, 256, 256, device = 'cuda')
-ldcast.predict(inputs)
-```
+## Documentation
 
-## Loading/saving weights
-To load from a folder containing in different files the weights of the autoencoder, of the denoiser and of the conditioner (and possibly ema weights):
-```python
-ldcast.load('/path/to/folder')
-```
-To save in a folder:
-```python
-ldcast.save('/path/to/folder')
-```
-## Training
+See `docs` folder for some documenation on the main `LDCast` class, on the autoencoder and on the latent diffusion part.
 
-If `sampled_radar_dataset` is a `SampledRadarDataset` built with Gabriele's code (https://github.com/DSIP-FBK/ConvGRU-Ensemble/blob/main/convgru_ensemble/datamodule.py), the autoencoder can be trained with
-```python
-ldcast.fit_autoencoder(sampled_radar_dataset)
-```
-and the ldm can be trained
-```python
-ldcast.fit_ldm(sampled_radar_dataset)
-```
-Keyword arguments can be passed to the trainer and the dataloader through the `trainer_kwargs` and `dataloader_kwargs` keywords.
+## TO DO
 
-# Autoencoder
-
-```python
-from mlcast.models.ldcast.autoenc.autoenc import AutoencoderKLNet, autoenc_loss
-from mlcast.models.base import NowcastingLightningModule
-autoencoder = NowcastingLightningModule(AutoencoderKLNet(), autoenc_loss()).to('cuda')
-```
-The autoencoder is an instance of the NowcastingLightningModule. Training the autoencoder:
-```python
-# create fake data
-inputs = torch.randn(2, 1, 4, 256, 256, device = 'cuda')
-
-with torch.no_grad():
-    # the forward pass of the autoencoder returns also the encoding
-    # so [0] is needed to select the decoded part only
-    y = autoencoder(x, 4)[0]
-batch = (x, y)
-
-import pytorch_lightning as L
-trainer = L.Trainer()
-trainer.fit(autoencoder, batch)
-```
-The inputs tensors have shape `(batch_size, n_channels, number of input radar images,) + spatial shape`. In latent space, the tensors have shape `(batch_size, 32, n, 64, 64)`, where 32 is the `hidden_width` of the `autoencoder` and `n` is the number of consecutive encoded radar images divided by `autoenc_time_ratio` (set to 4).
-
-The original weights can be loaded directly as
-```python
-autoenc_weights_fn = '/path/to/original/autoencoder/weights'
-autoencoder.net.load_state_dict(torch.load(autoenc_weights_fn))
-```
-
-# Latent diffusion (= conditioner + denoiser)
-The `LatentDiffusion` class is a `nn.Module` combining the conditioner and the denoiser.
-```python
-from mlcast.models.ldcast.diffusion.unet import UNetModel
-from mlcast.models.ldcast.context.context import AFNONowcastNetCascade
-
-# setup forecaster
-conditioner = AFNONowcastNetCascade(
-    32,
-    train_autoenc=False,
-    output_patches=future_timesteps//autoenc_time_ratio,
-    cascade_depth=3,
-    embed_dim=128,
-    analysis_depth=4
-).to('cuda')
-
-# setup denoiser
-from mlcast.models.ldcast.diffusion.unet import UNetModel
-denoiser = UNetModel(in_channels=autoencoder.net.hidden_width,
-    model_channels=256, out_channels=autoencoder.net.hidden_width,
-    num_res_blocks=2, attention_resolutions=(1,2), 
-    dims=3, channel_mult=(1, 2, 4), num_heads=8,
-    num_timesteps=future_timesteps//autoenc_time_ratio,
-    context_ch=[128, 256, 512] # context channels (= analysis_net.cascade_dims)
-                    ).to('cuda')
-
-from mlcast.models.ldcast.diffusion.diffusion import LatentDiffusion
-ldm = LatentDiffusion(conditioner, denoiser)
-```
-The `LatentDiffusion` class has a forward pass: it takes the noise, the timesteps of the diffusion and the encoded inputs
-```python
-latent_inputs = autoencoder.net.encode(inputs)
-noise = torch.randn(2, 32, 5, 64, 64, device = latent_inputs.device)
-t = torch.tensor([2, 3], device = latent_inputs.device)
-ldm((t, noise, latent_inputs))
-```
-The noise has to have the shape true radar images encoded in latent space.
-
-## LatentDiffusionLightning class and training of the ldm
-
-Create fake data to train the ldm:
-```python
-from torch.utils.data import TensorDataset
-true = torch.randn(2, 1, future_timesteps, 256, 256, device = 'cuda')
-dataset = TensorDataset(inputs, true)
-```
-Create a ```Dataset``` which convert the samples in latent space with the autoencoder
-```
-self.autoencoder.net.eval()
-latent_dataset = LatentDataset(dataset, autoencoder.net)
-dataloader = DataLoader(latent_dataset, batch_size=2)
-```
-Put `ldm` in a `LightningModule` and train:
-```python
-from torch.nn import L1Loss
-from mlcast.models.ldcast.diffusion.scheduler import Scheduler
-from mlcast.models.ldcast.diffusion.diffusion import LatentDiffusionLightning
-
-ldm_lightning = LatentDiffusionLightning(ldm, L1Loss(), Scheduler())
-trainer = L.Trainer()
-trainer.fit(ldm_lightning, dataloader)
-```
-## Loading the original weights
-The original weights can not be directly loaded because the models are structured a little differently, but the original weights files can be converted with
-```python
-from mlcast.models.ldcast.original_weights import convert_original_weights
-ldm_weights_fn = '/path/to/original/ldm/genforecast/weights'
-state_dict = convert_original_weights(ldm_weights_fn)
-torch.save(state_dict['denoiser'], 'denoiser_state_dict.pt')
-torch.save(state_dict['conditioner'], 'conditioner_state_dict.pt')
-torch.save(state_dict['ema'], 'ema.pt')
-```
-`state_dict['unmatched']` contains a `dict` with the elements that were not matched (should be empty). The weights for the conditioner and the denoiser (including the buffers for the scheduling) can then be loaded with
-```python
-conditioner.load_state_dict(torch.load('conditioner_state_dict.pt'))
-denoiser.load_state_dict(torch.load('denoiser_state_dict.pt'))
-```
-The EMA weights and parameters can be loaded with
-```python
-ldm_lighting.ema.load('ema.pt')
-```
-
-# TO DO
+reorganize the `LatentDiffusion` class ? for the moment, `LatentDiffusionNet.forward` is never called during inference because the inference process is quite different than in training (see `docs/ldm.md). It might be maybe a bit clearer to reorganize that by implementing explicitly different training and inference step methods in the `LatentDiffusion` class (that being said, `AutoencoderKLNet.forward` is never called either during inference)
 
 The 'timesteps' variable sometimes refers to the timesteps of the diffusion process (= 1000 during training) and sometimes refers to the nowcasting timesteps (where each time step = 5 minutes). Better to have different names.
 
@@ -173,44 +29,14 @@ It remains mainly to write code in the main LDCast class (in `ldcast.py`)
 
 It would be nice to rewrite the PLMS sampler, it is a little messy
 
-# Basics on diffusion models
+implement different parametrization than 'eps'
 
-See https://huggingface.co/blog/annotated-diffusion for some notations and formulas.
+use ZarrDataModule and ZarrDataset !
 
-During training, we start from a sample $x_0$ and create a series of samples $x_0, x_1, ..., x_T$ according to the formula (forward diffusion)
+add the computation of the EMA loss during the ldm training, change the LDCast.predict method so that EMA weights are automatically used during inference
 
-$$
-x_t = \sqrt{\bar{\alpha}_t}x_0 + \sqrt{1-\bar{\alpha_t}}\epsilon_t, \quad t = 1, ..., T
-$$
+add in the code (and in the doc) the input and output shapes of the nets
 
-where $\epsilon_t \sim \mathcal{N}(0, 1)$. The constants $\bar{\alpha}_t$ are chosen, but they need the property that $\bar{\alpha}_t \to 0$ as $t \to T$, so that $x_T \sim \mathcal{N}(0, 1)$. These constants are computed with an algorithm called a scheduler.
+understand which parameters can be changed, which have to be adapted when others change
 
-From a given $x_t$, the model can either be trained to predict $x_0$, $\epsilon_t$ or the velocity $v_t$. The latter is defined as
-
-$$
-v_t = \sqrt{\bar{\alpha}_t} \epsilon_t - \sqrt{1-\bar{\alpha}_t} x_0,
-$$
-
-which is equivalent to
-
-$$
-x_0 = \sqrt{\bar{\alpha}_t} x_t - \sqrt{1-\bar{\alpha}_t} v_t.
-$$
-
-The model is also given the timestep $t$. The loss is computed by comparing the target quantity ($\epsilon_t$, $x_0$ or $v_t$) with the predicted quantity by the model. Choosing to predict $x_0$, $\epsilon_t$ or $v_t$ is conceptually equivalent, the difference is in the numerical properties of the scheme (like in ODE integration schemes).
-
-The validation and test steps are done in the same way.
-
-So the model is trained to predict $x_0$ (or something from which we can compute $x_0$) from $x_T\sim \mathcal{N}(0, 1)$. But for large values of $t$, this prediction is actually quite bad. During actual prediction, the prediction is usually iteratively refined with sampler schemes. The idea is that, from the noise predicted based on $x_T$, the sampler scheme allows to compute $x_{T - \Delta t}$. The model is then used to predict the noise based on this estimation of $x_{T - \Delta t}$, and the sampler scheme allows to deduce $x_{T - 2\Delta t}$, etc. $\Delta t$ is usually taken of the order of 50 (while $T$ is usually 1000).
-
-In Hugging Face Diffusers library, the scheduler and the sampler parts are often combined in one object called a scheduler, but the sampler part is only used during inference.
-
-The original code was using antialiasing before feeding the samples to the model (at least during inference), I should add this
-
-# The variational autoencoder
-
-Source https://medium.com/@jpark7/finally-a-clear-derivation-of-the-vae-kl-loss-4cb38d2e47b3.
-
-Variational autoencoders encode the data through a normal distribution in latent space: each sample is represented by the mean and the standard deviation of the normal distribution. When decoding the sample, a new sample is created resembling the original sample, but is not quite the same. The degree to which we force the decoded samples to resemble the original ones is tuned by the `kl_weight` parameter of the KL loss function.
-
-When using the encoded sample (for example to produce a condition with the conditioner), only the mean is used. In the original code, `autoencoder.decode` was returning a tuple `(mean, log_var)`, so that one had to select the mean with `autoencoder.decode(x)[0]`, which is not very clear. I replaced this by adding a keyword `return_log_var` in `autoencoder.decode`.
+make the implementation of the `AutoencoderDataset` more efficient ? (see docs/autoencoder)

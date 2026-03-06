@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset, random_split, DataLoader
 import torch
 import pytorch_lightning as pl
+from tqdm import tqdm
 
 class LatentDataset(Dataset):
     def __init__(self, sampled_radar_dataset, autoencoder, autoenc_time_ratio = 4):
@@ -17,7 +18,7 @@ class LatentDataset(Dataset):
     def __getitem__(self, idx):
         
         with torch.no_grad():
-            sequence = self.dataset[idx]['data']
+            sequence = self.dataset[idx]
             x = sequence[:self.autoenc_time_ratio]
             y = sequence[self.autoenc_time_ratio:]
 
@@ -54,7 +55,7 @@ class AutoencoderDataset(Dataset):
         '''
         index_srd = idx // self.samples_ratio
         index_in_srd_sample = idx - index_srd * self.samples_ratio
-        x = self.srd[index_srd]['data'].reshape(self.samples_ratio, self.autoenc_time_ratio, 1, self.srd.w, self.srd.h)[index_in_srd_sample]
+        x = self.srd[index_srd].reshape(self.samples_ratio, self.autoenc_time_ratio, 1, self.srd.w, self.srd.h)[index_in_srd_sample]
 
         # for some reason, Gabriele put the time axis before the channel axis, change this
         x = x.swapaxes(0, 1).to(self.device)
@@ -86,3 +87,10 @@ class DataModule(pl.LightningDataModule):
         
     def test_dataloader(self):
         return DataLoader(self.test_dataset, shuffle = False, **self.dataloader_kwargs)
+
+def load_in_memory(dataset):
+    ds = []
+    for i in tqdm(range(len(dataset)), desc = 'Loading data in memory'):
+        # append the sample and create an extra dimension (to be the batch dimension)
+        ds.append(dataset[i][None].to('cpu'))
+    return torch.cat(ds, axis = 0)
