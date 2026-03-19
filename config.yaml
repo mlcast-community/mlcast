@@ -1,0 +1,94 @@
+model:
+  autoencoder:
+    optimizer_class: "${as_class: 'torch.optim.AdamW'}"
+    optimizer_kwargs:
+      lr: 0.001
+      betas: [0.5, 0.9]
+      weight_decay: 0.001
+    lr_scheduler: 
+      class: "${as_class: 'torch.optim.lr_scheduler.ReduceLROnPlateau'}"
+      kwargs:
+        patience: 3
+        factor: 0.25
+      extra:
+        monitor: 'val/rec_loss'
+        frequency: 1
+        interval: 'epoch'
+    antialiaser:
+      use: True
+      kwargs: {}
+    encoder: {}
+    decoder: {}
+    net_kwargs:
+      hidden_width: &autoencoder_hidden_width 32
+    loss:
+      kl_weight: 0.01
+    trainer:
+      max_epochs: 200
+      accelerator: 'gpu'
+      log_every_n_steps: 5
+      callbacks: "${as_class: '[pl.callbacks.EarlyStopping(\"val/loss_epoch\", patience=6, verbose=True, check_finite=False)]'}"
+      strategy: 'ddp'
+      num_nodes: 1
+      sync_batchnorm: True
+    dataloader:
+      batch_size: 1
+      num_workers: 0
+      persistent_workers: False
+        
+  ldm:
+    conditioner:
+      autoencoder_dim: *autoencoder_hidden_width
+      output_patches: &output_patches 5
+      cascade_depth: 3
+      embed_dim: 128
+      analysis_depth: 4
+    denoiser:
+      in_channels: *autoencoder_hidden_width
+      model_channels: 256
+      out_channels: *autoencoder_hidden_width
+      num_res_blocks: 2
+      attention_resolutions: [1, 2]
+      dims: 3
+      channel_mult: [1, 2, 4]
+      num_heads: 8
+      num_timesteps: *output_patches
+      context_ch: [128, 256, 512] # should be equal to conditioner.cascade_dims ?
+    ema:
+      use: True
+      kwargs:
+        store_device: 'cuda'
+    optimizer_class: "${as_class: 'torch.optim.AdamW'}"
+    optimizer_kwargs:
+      lr: 0.0001
+      betas: [0.5, 0.9]
+      weight_decay: 0.001
+    lr_scheduler: 
+      class: "${as_class: 'torch.optim.lr_scheduler.ReduceLROnPlateau'}"
+      kwargs:
+        patience: 3
+        factor: 0.25
+      extra:
+        monitor: 'val/loss' # is actually the ema loss, since the ema weights are used for validation
+        frequency: 1
+        interval: 'epoch'
+    scheduler: {} # diffusion scheduler
+    trainer:
+      max_epochs: 200
+      accelerator: 'gpu'
+      log_every_n_steps: 5
+      callbacks: "${as_class: '[pl.callbacks.EarlyStopping(\"val/loss_epoch\", patience=6, verbose=True, check_finite=False)]'}"
+      strategy: 'ddp'
+      num_nodes: 1
+      sync_batchnorm: True
+    dataloader:
+      batch_size: 1
+      num_workers: 0
+      persistent_workers: False
+
+sampled_radar_dataset:
+  zarr_path: '/scratch/martinbo/MLCast/radklim.zarr'
+  csv_path: '/scratch/martinbo/MLCast/LDCastTraining/indexes_radklim/sampled_datacubes_2001-01-01-2001-01-01_24x256x256_3x16x16_1500000.csv'
+  steps: 24
+  augment: False
+  data_var: 'RR'

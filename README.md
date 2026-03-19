@@ -1,83 +1,42 @@
-# mlcast
+# MLCast implementation of LDCast
 
-<!-- SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause -->
+see main branch https://github.com/mlcast-community/mlcast for context.
 
-The MLCast Community is a collaborative effort bringing together meteorological services, research institutions, and academia across Europe to develop a unified Python package for AI-based nowcasting. This is an initiative of the E-AI WG6 (Nowcasting) of EUMETNET.
+## Code structure
 
-This repo contains the `mlcast` package for machine learning-based weather nowcasting.
+There is one main `LDCast` class, subclassing the `NowcastingModelBase` class. There are three main nets in LDCast:
+ - the autoencoder
+ - the conditioner
+ - the denoiser
 
-## Project Status
+The `NowcastingLightningModule` is subclassed by the smaller composites of nets that should be trained at once. This gives two subclasses in this case:
+ - the autoencoder (encoder + decoder) has to be trained on its own, so there is one subclass of `NowcastingLightningModule` called `Autoencoder`
+ - the conditioner and the denoiser have to be trained together, so they are combined into one neural network (the `LatentDiffusionNet` class), whose training is handled by the `LatentDiffusion` subclass of the `NowcastingLightningModule`
 
-⚠️ **Under Development** - This package is currently in early development stages and not usable by end users. The API and functionality are subject to change.
+## Documentation
 
-## Installation
-```bash
-# Install from pypi
-pip install mlcast
-```
+See `docs` folder for some documenation on the main `LDCast` class, on the autoencoder and on the latent diffusion part.
 
-or
-```bash
-# Install from source
-git clone https://github.com/mlcast-community/mlcast
-cd mlcast
-uv pip install -e .
+## TO DO
 
-# For development
-uv pip install -e ".[dev]"
-```
+reorganize the `LatentDiffusion` class ? for the moment, `LatentDiffusionNet.forward` is never called during inference because the inference process is quite different than in training (see `docs/ldm.md). It might be maybe a bit clearer to reorganize that by implementing explicitly different training and inference step methods in the `LatentDiffusion` class (that being said, `AutoencoderKLNet.forward` is never called either during inference)
 
-## Project Structure
+The 'timesteps' variable sometimes refers to the timesteps of the diffusion process (= 1000 during training) and sometimes refers to the nowcasting timesteps (where each time step = 5 minutes). Better to have different names.
 
-```
-mlcast/
-├── src/mlcast/          # Main package source code
-│   ├── __init__.py      # Package initialization and version
-│   ├── data/            # Data loading and preprocessing
-│   │   ├── zarr_datamodule.py   # PyTorch Lightning data module for Zarr
-│   │   └── zarr_dataset.py      # PyTorch dataset for Zarr arrays
-│   ├── models/          # Lightning model implementations
-│   │   └── base.py      # Abstract base classes for nowcasting models
-│   └── modules/         # Pure PyTorch neural network modules
-│       └── convgru_modules.py   # ConvGRU encoder-decoder modules
-├── examples/            # Example scripts and notebooks
-│   └── scripts/
-│       └── simple_train.py      # Basic training example
-├── pyproject.toml       # Project metadata and dependencies
-├── LICENSE              # Apache 2.0 license
-└── README.md            # This file
-```
+We might integrate this code within the Hugging Face Diffusers Library.
 
-## Development
+It remains mainly to write code in the main LDCast class (in `ldcast.py`)
 
-This project uses `uv` for dependency management. To set up the development environment:
+It would be nice to rewrite the PLMS sampler, it is a little messy
 
-```bash
-# Install uv if not already installed
-curl -LsSf https://astral.sh/uv/install.sh | sh
+implement different parametrization than 'eps'
 
-# Install dependencies
-uv sync
+use ZarrDataModule and ZarrDataset !
 
-# Run pre-commit hooks
-uv run pre-commit install
-```
+add the computation of the EMA loss during the ldm training, change the LDCast.predict method so that EMA weights are automatically used during inference
 
-## Contributing
+add in the code (and in the doc) the input and output shapes of the nets
 
-Please feel free to raise issues or PRs if you have any suggestions or questions.
+understand which parameters can be changed, which have to be adapted when others change
 
-## Links to presentations for discussion about the API
-
-- [2025/02/04 first design discussions](https://docs.google.com/presentation/d/1oWmnyxOfUMWgeQi0XyX4fX9YDMX1vl6h/edit?usp=drive_link&rtpof=true&sd=true)
-
-## License
-
-This project is dual-licensed under either:
-
-* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-* BSD 3-Clause License ([LICENSE-BSD](LICENSE-BSD) or https://opensource.org/licenses/BSD-3-Clause)
-
-at your option.
-
-See [LICENSE](LICENSE) for more details.
+make the implementation of the `AutoencoderDataset` more efficient ? (see docs/autoencoder)

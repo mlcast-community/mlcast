@@ -113,15 +113,16 @@ class NowcastingLightningModule(L.LightningModule):
         loss: nn.Module,
         optimizer_class: Any | None = None,
         optimizer_kwargs: dict | None = None,
-        **kwargs: Any,
+        lr_scheduler_config: dict | None = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["net", "loss"])
         self.net = net
         self.loss = loss
         self.optimizer_class = torch.optim.Adam if optimizer_class is None else optimizer_class
+        self.lr_scheduler_config = lr_scheduler_config
 
-    def forward(self, x: torch.Tensor, n_timesteps: int) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the model.
         Args:
             x: Input tensor with shape (batch, seq_len, channels, height, width)
@@ -129,8 +130,16 @@ class NowcastingLightningModule(L.LightningModule):
         Returns:
             Output tensor with shape (batch, n_timesteps, channels, height, width)
         """
-        return self.net(x, n_timesteps)  # Assuming net is a callable model
+        return self.net(x)  # Assuming net is a callable model
 
+    def training_logic(self, batch, batch_idx):
+        """Can be overwritten if needed"""
+        x, y = batch
+        predictions = self.forward(x)
+        loss = self.loss(predictions, y)
+
+        return loss
+    
     def model_step(self, batch: Any, batch_idx: int, step_name: str = "train") -> torch.Tensor:
         """Generic model step for training or validation.
 
@@ -141,20 +150,24 @@ class NowcastingLightningModule(L.LightningModule):
         Returns:
             Loss value for the current batch
         """
-        x, y = batch
-        predictions = self.forward(x, n_timesteps=y.shape[1])
-        loss = self.loss(predictions, y)
+        
+        loss = self.training_logic(batch, batch_idx)
+        loss = self.print_log_loss(loss, step_name)
+        
+        return loss
+
+    def print_log_loss(self, loss, step_name):
         if isinstance(loss, dict):
             # append step name to loss keys for logging
-            loss = {f"{step_name}/{k}": v.item() for k, v in loss}
-            self.log_dict(loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-            loss = loss.get("loss", loss.get("total_loss", None))
+            loss = {f"{step_name}/{k}": v for k, v in loss.items()}
+            self.log_dict(loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            loss = loss.get(f"{step_name}/total_loss", None)
             if loss is None:
                 raise ValueError(f"Loss is None for step {step_name}. Ensure loss function returns a valid tensor.")
         else:
             self.log(f"{step_name}/loss", loss.item(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
         return loss
-
+    
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         """Training step for a single batch.
 
@@ -184,5 +197,22 @@ class NowcastingLightningModule(L.LightningModule):
 
         Returns:
             Optimizer instance to use for training
+
+        following https://lightning.ai/docs/pytorch/stable/common/optimization.html for the scheduler part
         """
-        return self.optimizer_class(self.parameters(), **(self.hparams.optimizer_kwargs or {}))
+        optimizer = self.optimizer_class(self.parameters(), **(self.hparams.optimizer_kwargs or {}))
+        
+        if self.lr_scheduler_config is None:
+            return optimizer
+
+        else:
+            cls = self.lr_scheduler_config['class']
+            kwargs = self.lr_scheduler_config['kwargs']
+            extra = self.lr_scheduler_config['extra']
+
+            # up to here, extra might be a omegaconf dictconfig object, but we need add the scheduler to it
+            # so convert it to a dict
+            extra = {k: v for k, v in extra.items()}
+            extra['scheduler'] = cls(optimizer, **kwargs)
+            
+            return {'optimizer': optimizer, 'lr_scheduler': extra}
