@@ -1,7 +1,3 @@
-# everything is from the original config, except for the batch size
-
-device: &device 'cuda'
-
 model:
   autoencoder:
     optimizer_class: "${as_class: 'torch.optim.AdamW'}"
@@ -14,25 +10,33 @@ model:
       kwargs:
         patience: 3
         factor: 0.25
-        verbose: True
       extra:
         monitor: 'val/rec_loss'
         frequency: 1
         interval: 'epoch'
     antialiaser:
       use: True
-      kwargs:
-          device: *device
+      kwargs: {}
     encoder: {}
     decoder: {}
     net_kwargs:
       hidden_width: &autoencoder_hidden_width 32
     loss:
       kl_weight: 0.01
-    device: *device
+    trainer:
+      max_epochs: 200
+      accelerator: 'gpu'
+      log_every_n_steps: 5
+      callbacks: "${as_class: '[pl.callbacks.EarlyStopping(\"val/loss_epoch\", patience=6, verbose=True, check_finite=False)]'}"
+      strategy: 'ddp'
+      num_nodes: 1
+      sync_batchnorm: True
+    dataloader:
+      batch_size: 1
+      num_workers: 0
+      persistent_workers: False
         
   ldm:
-    device: *device
     conditioner:
       autoencoder_dim: *autoencoder_hidden_width
       output_patches: &output_patches 5
@@ -53,7 +57,7 @@ model:
     ema:
       use: True
       kwargs:
-        store_device: 'cpu'
+        store_device: 'cuda'
     optimizer_class: "${as_class: 'torch.optim.AdamW'}"
     optimizer_kwargs:
       lr: 0.0001
@@ -64,29 +68,27 @@ model:
       kwargs:
         patience: 3
         factor: 0.25
-        verbose: True
       extra:
-        monitor: 'val/ema_loss'
+        monitor: 'val/loss' # is actually the ema loss, since the ema weights are used for validation
         frequency: 1
         interval: 'epoch'
     scheduler: {} # diffusion scheduler
-
-dataloader:
-  batch_size: 32
-  num_workers: 4
-  persistent_workers: True
-
-trainer:
-  max_epochs: 200
-  accelerator: 'gpu'
-  log_every_n_steps: 5
-  callbacks: "${as_class: '[pl.callbacks.EarlyStopping(\"val/rec_loss\", patience=6, verbose=True, check_finite=False)]'}"
+    trainer:
+      max_epochs: 200
+      accelerator: 'gpu'
+      log_every_n_steps: 5
+      callbacks: "${as_class: '[pl.callbacks.EarlyStopping(\"val/loss_epoch\", patience=6, verbose=True, check_finite=False)]'}"
+      strategy: 'ddp'
+      num_nodes: 1
+      sync_batchnorm: True
+    dataloader:
+      batch_size: 1
+      num_workers: 0
+      persistent_workers: False
 
 sampled_radar_dataset:
-  zarr_path: 'test.zarr'
-  csv_path: 'mlcast-dataset-sampler/sampled_datacubes_2017-01-01-2017-02-01_24x256x256_3x16x16_10000.csv'
+  zarr_path: '/scratch/martinbo/MLCast/radklim.zarr'
+  csv_path: '/scratch/martinbo/MLCast/LDCastTraining/indexes_radklim/sampled_datacubes_2001-01-01-2001-01-01_24x256x256_3x16x16_1500000.csv'
   steps: 24
   augment: False
-  data_var: 'precip_intensity_EDK'
-
-
+  data_var: 'RR'

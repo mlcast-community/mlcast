@@ -160,7 +160,7 @@ class NowcastingLightningModule(L.LightningModule):
         if isinstance(loss, dict):
             # append step name to loss keys for logging
             loss = {f"{step_name}/{k}": v for k, v in loss.items()}
-            self.log_dict(loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            self.log_dict(loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
             loss = loss.get(f"{step_name}/total_loss", None)
             if loss is None:
                 raise ValueError(f"Loss is None for step {step_name}. Ensure loss function returns a valid tensor.")

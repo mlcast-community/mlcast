@@ -6,7 +6,7 @@ from .data import LatentDataset, AutoencoderDataset, DataModule, load_in_memory
 import torch
 import contextlib
 
-torch.multiprocessing.set_start_method('spawn')
+#torch.multiprocessing.set_start_method('spawn')
 
 class LDCast(NowcastingModelBase):
     def __init__(self, ldm, autoencoder, sampler):
@@ -27,16 +27,16 @@ class LDCast(NowcastingModelBase):
         self.fit_ldm(sampled_radar_dataset, dataloader_kwargs = dataloader_kwargs, trainer_kwargs = trainer_kwargs)
 
     def fit_ldm(self, sampled_radar_dataset, dataloader_kwargs = {}, trainer_kwargs = {}):
-        self.autoencoder.net.eval()
-        self.ldm.net.train()
 
-        dataset = LatentDataset(sampled_radar_dataset, self.autoencoder.net)
+        #assert False, 'need to add a trainer instance in the LatentDataset class to automatically move the autoencoder to cuda etc.'
+        self.autoencoder.net.eval()
+
+        dataset = LatentDataset(sampled_radar_dataset, self.autoencoder)
         datamodule = DataModule(dataset, **dataloader_kwargs)
         trainer = L.Trainer(**trainer_kwargs)
         trainer.fit(self.ldm, datamodule)
     
     def fit_autoencoder(self, sampled_radar_dataset, dataloader_kwargs = {}, trainer_kwargs = {}):
-        self.autoencoder.net.train()
         
         dataset = AutoencoderDataset(sampled_radar_dataset)
         datamodule = DataModule(dataset, **dataloader_kwargs)
@@ -48,12 +48,13 @@ class LDCast(NowcastingModelBase):
 
         assert False, 'prediction should be implemented with a trainer, to take into account the switches of ema weights for example'''
         
-        latent_inputs = self.autoencoder.net.encode(inputs)
+        latent_inputs = self.autoencoder.encode(inputs)
         condition = self.ldm.net.conditioner(latent_inputs)
 
         gen_shape = (32, 5, 256//4, 256//4)
         batch_size = len(latent_inputs)
 
+        # this could also be put in the LatentDiffusion class, by overriding the predict_step method (https://lightning.ai/docs/pytorch/stable/common/lightning_module.html#inference)
         with contextlib.redirect_stdout(None):
             (s, intermediates) = self.sampler.sample(
                 num_diffusion_iters, 
@@ -86,14 +87,12 @@ class LDCast(NowcastingModelBase):
     @classmethod
     def from_config(cls, config):
         
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        
         from .autoenc.autoenc import Autoencoder
         from .diffusion.diffusion import LatentDiffusion
         from .diffusion.plms import PLMSSampler
         
         autoencoder = Autoencoder.from_config(config['autoencoder'])
-        ldm = LatentDiffusion.from_config(config['ldm'])
+        ldm = LatentDiffusion.from_config(config['ldm'], autoencoder)
         sampler = PLMSSampler(ldm.net.denoiser)
         
         return cls(ldm, autoencoder, sampler)

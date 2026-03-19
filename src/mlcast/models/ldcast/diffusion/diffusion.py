@@ -26,11 +26,17 @@ class LatentDiffusionNet(nn.Module):
 
 
 class LatentDiffusion(NowcastingLightningModule):
-    def __init__(self, net, loss, scheduler, ema_config = {'use': True}, **kwargs):
+    def __init__(self, net, loss, scheduler, autoencoder, ema_config = {'use': True}, **kwargs):
         super().__init__(net, loss, **kwargs)
+        self.save_hyperparameters(ignore=['net', 'loss', 'autoencoder'])
         self.scheduler = scheduler
+        self.autoencoder = autoencoder # the LatentDiffusion class needs the autoencoder so that, in a parallel training setup, Lightning creates one instance of the autoencoder on each GPU
 
-        # register the schedules (i.e. the values of alpha, beta etc).
+        # Freeze autoencoder
+        for param in self.autoencoder.parameters():
+            param.requires_grad = False
+
+        # register the schedules (i.e. the values of alpha, beta etc)
         self.register_schedule()
 
         if ema_config['use']:
@@ -52,7 +58,11 @@ class LatentDiffusion(NowcastingLightningModule):
             self.net.denoiser.register_buffer(k, schedule[k])
     
     def training_logic(self, batch, batch_idx):
-        latent_inputs, latent_true = batch
+        
+        inputs, true = batch
+        with torch.no_grad():
+            latent_inputs = self.autoencoder.encode(inputs)
+            latent_true = self.autoencoder.encode(true)
         x0 = latent_true
         
         t, noise, x_t = self.q_sample(x0)
@@ -78,6 +88,10 @@ class LatentDiffusion(NowcastingLightningModule):
         
         return t, noise, x_noisy
 
+    def on_fit_start(self):
+        if hasattr(self, 'ema'):
+            self.ema.register()
+    
     def on_train_batch_end(self, outputs, batch, batch_idx):
         if hasattr(self, 'ema'):
             self.ema.update()
@@ -107,7 +121,7 @@ class LatentDiffusion(NowcastingLightningModule):
             self.ema.restore()
 
     @classmethod
-    def from_config(cls, config):
+    def from_config(cls, config, autoencoder):
 
         from .scheduler import Scheduler
         from .unet import UNetModel
@@ -119,10 +133,10 @@ class LatentDiffusion(NowcastingLightningModule):
         loss = nn.MSELoss()
         scheduler = Scheduler(**config['scheduler'])
         
-        return cls(net, loss, scheduler,
+        return cls(net, loss, scheduler, autoencoder,
                    ema_config = config['ema'],
                    optimizer_class = config['optimizer_class'],
                    optimizer_kwargs = config['optimizer_kwargs'],
                    lr_scheduler_config = config['lr_scheduler']
-                  ).to(config['device'])
+                  )
 

@@ -30,12 +30,27 @@ class AutoencoderLoss(nn.Module):
 class Autoencoder(NowcastingLightningModule):
     def __init__(self, net, loss, antialiaser = Antialiaser(), **kwargs):
         super().__init__(net, loss, **kwargs)
+        self.save_hyperparameters(ignore=['net', 'loss', 'antialiaser'])
         self.antialiaser = antialiaser
 
     def forward(self, x):
         if self.antialiaser is not None:
             x = self.antialiaser(x)
         return self.net(x)
+    
+    def encode(self, x):
+        if self.antialiaser is not None:
+            x = self.antialiaser(x)
+        return self.net.encode(x)
+
+    def training_logic(self, batch, batch_idx):
+        x, y = batch
+        predictions = self.forward(x)
+        if self.antialiaser is not None:
+            y = self.antialiser(y)
+        loss = self.loss(predictions, y)
+
+        return loss
 
     @classmethod
     def from_config(cls, config):
@@ -51,7 +66,7 @@ class Autoencoder(NowcastingLightningModule):
                    optimizer_class = config['optimizer_class'],
                    optimizer_kwargs = config['optimizer_kwargs'],
                    lr_scheduler_config = config['lr_scheduler']
-                  ).to(config['device'])
+                  )
 
 class AutoencoderKLNet(nn.Module):
     def __init__(
@@ -68,7 +83,6 @@ class AutoencoderKLNet(nn.Module):
         self.hidden_width = hidden_width
         self.to_moments = nn.Conv3d(encoded_channels, 2 * hidden_width, kernel_size=1)
         self.to_decoder = nn.Conv3d(hidden_width, encoded_channels, kernel_size=1)
-        self.log_var = nn.Parameter(torch.zeros(size=()))
 
     def encode(self, x, return_log_var = False):        
         if len(x.shape) < 5:
@@ -79,9 +93,6 @@ class AutoencoderKLNet(nn.Module):
         if return_log_var:
             return (mean, log_var)
         else:
-            # if the first axis has length 1, it is the batch dimension and should be removed
-            if mean.shape[0] == 1:
-                mean = mean[0]
             return mean
 
     def decode(self, z):

@@ -17,17 +17,15 @@ class EMA():
         self.shadow = {}                                       # to store EMA weights
         self.backup = {}                                       # to store the model weights when we replace them by ema weights
         self.num_updates = 0 if use_num_updates else -1        # for dynamical decay
-        self.store_device = store_device                       # device on which to store the weights
-        self.model_device = next(model.parameters()).device    # device on which the weights are used
-
-        self.register()
-        
+        self.store_device = store_device                       # device on which to store the weights      
+    
     def register(self):
         '''initialize the ema weights with the model weights'''
+        print(next(self.model.parameters()).device)
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                self.shadow[name] = param.data.clone().detach().to(self.store_device)
-
+                self.shadow[name] = param.data.detach().to(self.store_device)
+                
     def update(self):
         '''update the shadow parameters'''
 
@@ -44,16 +42,18 @@ class EMA():
 
     def apply_shadow(self):
         '''apply shadow (EMA) weights to the model'''
+        model_device = next(self.model.parameters()).device
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                self.backup[name] = param.data.clone().detach().to(self.store_device)
-                param.data = self.shadow[name].to(self.model_device)
+                self.backup[name] = param.data.detach().to(self.store_device)
+                param.data = self.shadow[name].to(model_device)
 
     def restore(self):
         '''restore original model weights from backup'''
+        model_device = next(self.model.parameters()).device
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                param.data = self.backup[name].to(self.model_device)
+                param.data = self.backup[name].to(model_device)
 
     def load(self, filename):
         '''load the ema (shadow) weights parameters'''

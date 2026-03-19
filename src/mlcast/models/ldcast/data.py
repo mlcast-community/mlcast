@@ -7,10 +7,10 @@ class LatentDataset(Dataset):
     def __init__(self, sampled_radar_dataset, autoencoder, autoenc_time_ratio = 4):
         super().__init__()
 
-        self.autoencoder = autoencoder
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.autoencoder = autoencoder.to(self.device)
         self.dataset = sampled_radar_dataset
         self.autoenc_time_ratio = autoenc_time_ratio
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     def __len__(self):
         return len(self.dataset)
@@ -19,17 +19,17 @@ class LatentDataset(Dataset):
         
         with torch.no_grad():
             sequence = self.dataset[idx]
-            x = sequence[:self.autoenc_time_ratio]
-            y = sequence[self.autoenc_time_ratio:]
+            x = sequence[:, :self.autoenc_time_ratio]
+            y = sequence[:, self.autoenc_time_ratio:]
 
             # for some reason, Gabriele put the time axis before the channel axis, change this
-            x = x.swapaxes(0, 1).to(self.device)
-            y = y.swapaxes(0, 1).to(self.device)
+            #x = x.swapaxes(0, 1).to(self.device)
+            #y = y.swapaxes(0, 1).to(self.device)
             
-            latent_x = self.autoencoder.encode(x)
-            latent_y = self.autoencoder.encode(y)
-            
-        return latent_x, latent_y
+            #latent_x = self.autoencoder.encode(x)
+            #latent_y = self.autoencoder.encode(y)
+
+        return x, y #latent_x, latent_y
 
 class AutoencoderDataset(Dataset):
     '''
@@ -42,8 +42,6 @@ class AutoencoderDataset(Dataset):
         self.srd = sampled_radar_dataset
         self.autoenc_time_ratio = autoenc_time_ratio
         self.samples_ratio = int(self.srd.steps / self.autoenc_time_ratio) # is 6 in the usual case where steps = 24 and autoenc_time_ratio = 4
-
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
     def __len__(self):
         return self.samples_ratio * len(self.srd)
@@ -55,10 +53,10 @@ class AutoencoderDataset(Dataset):
         '''
         index_srd = idx // self.samples_ratio
         index_in_srd_sample = idx - index_srd * self.samples_ratio
-        x = self.srd[index_srd].reshape(self.samples_ratio, self.autoenc_time_ratio, 1, self.srd.w, self.srd.h)[index_in_srd_sample]
+        x = self.srd[index_srd].reshape(self.samples_ratio, 1, self.autoenc_time_ratio, self.srd.w, self.srd.h)[index_in_srd_sample]
 
         # for some reason, Gabriele put the time axis before the channel axis, change this
-        x = x.swapaxes(0, 1).to(self.device)
+        # x = x.swapaxes(0, 1)
 
         # for the autoencoder, y is equal to x
         y = x
