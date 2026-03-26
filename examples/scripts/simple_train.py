@@ -3,7 +3,7 @@
 This script shows the programmatic API for configuring and running
 experiments. For CLI usage with arbitrary overrides, use::
 
-    python -m mlcast \\
+    python -m mlcast train \\
         --config config:convgru_experiment \\
         --config set:data.zarr_path=/path/to/data.zarr \\
         --config set:data.csv_path=/path/to/sampled.csv \\
