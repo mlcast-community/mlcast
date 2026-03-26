@@ -1,98 +1,131 @@
-"""Contains the dataloader for the MLCast."""
+"""PyTorch Lightning data module for radar datacube datasets.
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+Handles train/val/test splitting and DataLoader creation from a single
+Zarr store and CSV coordinate file produced by mlcast-dataset-sampler.
+"""
 
-import torch
-from pytorch_lightning import LightningDataModule
-from torch.utils.data import DataLoader, Dataset, random_split
+import pandas as pd
+import pytorch_lightning as pl
+from torch.utils.data import DataLoader
 
-from mlcast.data.zarr_dataset import ZarrDataset
+from .zarr_dataset import SampledRadarDataset
 
 
-@dataclass
-class ZarrDataModule(LightningDataModule):
-    """`LightningDataModule` for MLCast."""
+class RadarDataModule(pl.LightningDataModule):
+    """PyTorch Lightning data module for radar datacube datasets.
 
-    dataset_dir: Path | None = None
-    variable_name: str = None
-    train_val_test_split: tuple[float, float, float] = (0.7, 0.2, 0.1)
-    batch_size: int = 8
-    dataset_size: int | None = None
-    crop_size: int | None = 256
-    input_size: int = 5
-    output_size: int = 10
-    num_workers: int = 0
+    Handles train/val/test splitting and DataLoader creation from a single
+    Zarr store and CSV coordinate file.
 
-    pin_memory: bool = False
-    data_train: Dataset | None = None
-    data_val: Dataset | None = None
-    data_test: Dataset | None = None
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the Zarr dataset.
+    csv_path : str
+        Path to the CSV file with datacube coordinates.
+    variable_name : str
+        Name of the variable to load from the Zarr store.
+    steps : int
+        Number of timesteps per sample.
+    train_ratio : float, optional
+        Fraction of data used for training. Default is ``0.7``.
+    val_ratio : float, optional
+        Fraction of data used for validation. Default is ``0.15``.
+    return_mask : bool, optional
+        Whether to return NaN masks. Default is ``False``.
+    deterministic : bool, optional
+        Whether to use fixed random seeds. Default is ``False``.
+    augment : bool, optional
+        Whether to apply data augmentation (training set only). Default is
+        ``True``.
+    width : int, optional
+        Spatial width of each datacube. Default is ``256``.
+    height : int, optional
+        Spatial height of each datacube. Default is ``256``.
+    time_depth : int, optional
+        Number of timesteps in the sampled window. Default is ``24``.
+    **dataloader_kwargs
+        Additional keyword arguments forwarded to ``DataLoader`` (e.g.
+        ``batch_size``, ``num_workers``, ``pin_memory``).
+    """
 
-    def __post_init__(
+    def __init__(
         self,
-    ) -> None:
-        """Initialize the LightningDataModule."""
+        zarr_path,
+        csv_path,
+        variable_name,
+        steps,
+        train_ratio=0.7,
+        val_ratio=0.15,
+        return_mask=False,
+        deterministic=False,
+        augment=True,
+        width=256,
+        height=256,
+        time_depth=24,
+        **dataloader_kwargs,
+    ):
         super().__init__()
-        self.save_hyperparameters(logger=False)
+        self.zarr_path = zarr_path
+        self.csv_path = csv_path
+        self.variable_name = variable_name
+        self.steps = steps
+        self.train_ratio = train_ratio
+        self.val_ratio = val_ratio
+        self.dataloader_kwargs = dataloader_kwargs
+        self.return_mask = return_mask
+        self.deterministic = deterministic
+        self.augment = augment
+        self.width = width
+        self.height = height
+        self.time_depth = time_depth
 
-    def setup(self, stage: str | None = None) -> None:  # noqa: ARG002
-        """Load data.
+    def setup(self, stage=None):
+        """Create train, validation, and test datasets.
 
-        Set variables: `self.data_train`, `self.data_val`, `self.data_test`.
-
-        This method is called by Lightning before `trainer.fit()`, `trainer.validate()`,
-        `trainer.test()`, and `trainer.predict()`, so be careful not to execute things
-        like random split twice!
-        Also, it is called after `self.prepare_data()` and there is a barrier in
-        between which ensures that all the processes proceed to `self.setup()` once
-        the data is prepared and available for use.
-
-        :param stage: The stage to setup. Either `"fit"`, `"validate"`, `"test"`, or
-        `"predict"`. Defaults to ``None``.
+        Splits are chronological: the first ``train_ratio`` fraction is used
+        for training, the next ``val_ratio`` for validation, and the rest for
+        testing. Augmentation is only applied to the training set.
         """
-        # load and split datasets only if not loaded already
-        if not self.data_train and not self.data_val and not self.data_test:
-            dataset = ZarrDataset(
-                dataset_dir=self.dataset_dir,
-                variable_name=self.variable_name,
-                input_size=self.input_size,
-                output_size=self.output_size,
-                crop_size=self.crop_size,
-            )
-            self.data_train, self.data_val, self.data_test = random_split(
-                dataset=dataset,
-                lengths=self.train_val_test_split,
-                generator=torch.Generator().manual_seed(42),
-            )
+        coords = pd.read_csv(self.csv_path).sort_values("t")
+        n = len(coords)
 
-    def train_dataloader(self) -> DataLoader[Any]:
-        """Return train dataloader."""
-        return DataLoader(
-            dataset=self.data_train,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            shuffle=True,
+        train_end = int(n * self.train_ratio)
+        val_end = int(n * (self.train_ratio + self.val_ratio))
+
+        common_kwargs = dict(
+            zarr_path=self.zarr_path,
+            csv_path=self.csv_path,
+            variable_name=self.variable_name,
+            steps=self.steps,
+            return_mask=self.return_mask,
+            deterministic=self.deterministic,
+            width=self.width,
+            height=self.height,
+            time_depth=self.time_depth,
         )
 
-    def val_dataloader(self) -> DataLoader[Any]:
-        """Return validation dataloader."""
-        return DataLoader(
-            dataset=self.data_val,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            shuffle=False,
+        self.train_dataset = SampledRadarDataset(
+            **common_kwargs,
+            augment=self.augment,
+            indices=range(0, train_end),
+        )
+        self.val_dataset = SampledRadarDataset(
+            **common_kwargs,
+            augment=False,
+            indices=range(train_end, val_end),
+        )
+        self.test_dataset = SampledRadarDataset(
+            **common_kwargs,
+            augment=False,
+            indices=range(val_end, n),
         )
 
-    def test_dataloader(self) -> DataLoader[Any]:
-        """Return test dataloader."""
-        return DataLoader(
-            dataset=self.data_test,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            shuffle=False,
-        )
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, shuffle=True, **self.dataloader_kwargs)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, shuffle=False, **self.dataloader_kwargs)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_dataset, shuffle=False, **self.dataloader_kwargs)

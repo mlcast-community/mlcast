@@ -1,3 +1,3 @@
-from .convgru_modules import ConvGRU
+from .convgru_modules import EncoderDecoder
 
-__all__ = ["ConvGRU"]
+__all__ = ["EncoderDecoder"]

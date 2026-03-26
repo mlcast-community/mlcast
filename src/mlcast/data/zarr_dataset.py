@@ -1,89 +1,151 @@
-"""Contains the Torch dataset for MLCast."""
+"""PyTorch dataset for loading radar datacubes from Zarr stores.
 
-from pathlib import Path
-from random import randint
+Loads spatio-temporal datacubes using pre-sampled coordinates from a CSV
+file produced by mlcast-dataset-sampler.
+"""
+
+import time
 
 import numpy as np
-import zarr
+import pandas as pd
+import torch
+import xarray as xr
 from torch.utils.data import Dataset
 
+from mlcast.utils import rainrate_to_normalized
 
-class ZarrDataset(Dataset):
-    """Torch dataset for MLCast.
 
-    Args:
-    ----
-    dataset_dir: Path to the dataset.
-    dataset_size: Size of the dataset to load.
-    input_size: Size of the input to load.
-    output_size: Size of the output to load.
-    crop_size: Size of the crop to load.
+class SampledRadarDataset(Dataset):
+    """PyTorch dataset that loads radar datacubes from a Zarr store using
+    pre-sampled spatial-temporal coordinates from a CSV file.
 
+    Each sample is a spatio-temporal datacube of shape ``(T, 1, H, W)``
+    converted from rain rate to normalized reflectivity.
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to the Zarr dataset.
+    csv_path : str
+        Path to the CSV file with columns ``(t, x, y)`` specifying the
+        top-left corner of each datacube.
+    variable_name : str
+        Name of the variable to load from the Zarr store (e.g. ``'RR'``,
+        ``'LBMR'``).
+    steps : int
+        Number of timesteps to extract per sample.
+    return_mask : bool, optional
+        If ``True``, also return a spatial NaN mask. Default is ``False``.
+    deterministic : bool, optional
+        If ``True``, use a fixed random seed (42) for reproducibility.
+        Default is ``False``.
+    augment : bool, optional
+        If ``True``, apply random spatial augmentations (rotation, flips).
+        Default is ``False``.
+    indices : sequence of int or None, optional
+        Subset of row indices to use from the CSV. If ``None``, use all rows.
+        Default is ``None``.
+    width : int, optional
+        Spatial width of each datacube. Default is ``256``.
+    height : int, optional
+        Spatial height of each datacube. Default is ``256``.
+    time_depth : int, optional
+        Number of timesteps in the sampled window. Default is ``24``.
     """
 
     def __init__(
         self,
-        dataset_dir: Path | None = None,
-        variable_name: str | None = None,
-        input_size: int = 10,
-        output_size: int = 5,
-        crop_size: int = 256,
-    ) -> None:
-        """Initialize the Dataset."""
-        super().__init__()
-        self.dataset_dir: Path | None = dataset_dir
+        zarr_path: str,
+        csv_path: str,
+        variable_name: str,
+        steps: int,
+        return_mask: bool = False,
+        deterministic: bool = False,
+        augment: bool = False,
+        indices=None,
+        width: int = 256,
+        height: int = 256,
+        time_depth: int = 24,
+    ):
+        self.coords = pd.read_csv(csv_path).sort_values("t")
+        if indices is not None:
+            self.coords = self.coords.iloc[list(indices)].reset_index(drop=True)
+        self.zg = xr.open_zarr(zarr_path)
+        self.data_var = self.zg[variable_name]
+        self.rng = np.random.default_rng(seed=42) if deterministic else np.random.default_rng(int(time.time()))
+        self.return_mask = return_mask
+        self.augment = augment
 
-        self.input_size: int = input_size
-        self.output_size: int = output_size
-        self.seq_len: int = self.input_size + self.output_size
+        self.w = width
+        self.h = height
+        self.dt = time_depth
+        self.steps = steps
 
-        self.crop_size: int = crop_size
-        self.variable_name: str = variable_name
+        if self.steps > self.dt:
+            print(f"Warning: requested steps ({self.steps}) > sampled time window ({self.dt})")
 
-        self.data = zarr.open(self.dataset_dir)
+    def __len__(self):
+        return len(self.coords)
 
-        if self.dataset_dir is None:
-            msg = "dataset_dir must be specified"
-            raise ValueError(msg)
-        if self.variable_name is None:
-            msg = "variable_name must be specified"
-            raise ValueError(msg)
-        self.img_size = self.data[self.variable_name].shape[1:]
+    def shape(self):
+        return (len(self.coords), self.steps, 1, self.w, self.h)
 
-    def __len__(self) -> int:
-        """Return the length of the dataset."""
-        return self.data["time"].shape[0]
+    def _apply_augmentations(
+        self, *tensors, rotate_prob: float = 0.5, hflip_prob: float = 0.5, vflip_prob: float = 0.5
+    ):
+        """Apply random spatial augmentations consistently to all input tensors."""
+        if self.rng.random() < rotate_prob:
+            k = self.rng.integers(1, 4)
+            tensors = [torch.rot90(t, k, dims=[-2, -1]) for t in tensors]
 
-    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray]:
-        """Return the item at the given index."""
-        sequence = self.data[self.variable_name][index : index + self.seq_len]
-        input_seq = sequence[: self.input_size]
-        target_seq = sequence[self.input_size :]
+        if self.rng.random() < hflip_prob:
+            tensors = [torch.flip(t, dims=[-1]) for t in tensors]
 
-        if self.crop_size is not None:
-            slice_x = random_slice(self.crop_size, self.img_size[0])
-            slice_y = random_slice(self.crop_size, self.img_size[1])
+        if self.rng.random() < vflip_prob:
+            tensors = [torch.flip(t, dims=[-2]) for t in tensors]
+
+        tensors = [t.contiguous() for t in tensors]
+        return tensors[0] if len(tensors) == 1 else tuple(tensors)
+
+    def __getitem__(self, idx: int):
+        """Load and return a single datacube sample.
+
+        Returns
+        -------
+        sample : dict of str to torch.Tensor
+            Dictionary with key ``'data'`` containing a tensor of shape
+            ``(T, 1, H, W)``. If ``return_mask`` is ``True``, also contains
+            ``'mask'`` of shape ``(1, 1, H, W)``.
+        """
+        t0, x0, y0 = self.coords.iloc[idx]
+
+        x_slice = slice(x0, x0 + self.w)
+        y_slice = slice(y0, y0 + self.h)
+
+        if self.steps < self.dt:
+            t_start = self.rng.integers(t0, t0 + self.dt - self.steps + 1)
         else:
-            slice_x = slice(None, None)
-            slice_y = slice(None, None)
-        input_seq = input_seq[:, slice_x, slice_y]
-        target_seq = target_seq[:, slice_x, slice_y]
-        input_seq = np.expand_dims(input_seq, axis=1)
-        target_seq = np.expand_dims(target_seq, axis=1)
-        return input_seq, target_seq
+            t_start = t0
+        t_slice = slice(t_start, t_start + self.steps)
 
+        data = rainrate_to_normalized(self.data_var[t_slice, x_slice, y_slice])
 
-def random_slice(
-    crop: int,
-    img_size: int,
-    *,
-    centered: bool = False,
-) -> slice:
-    """Randomly crop into an image."""
-    if crop > img_size:
-        msg = f"""Crop size can't be bigger than the original image.
-        ${crop} > ${img_size}"""
-        raise ValueError(msg)
-    start = img_size / 2 - crop / 2 if centered else randint(0, img_size - crop)
+        if self.return_mask:
+            mask = (~(np.isnan(data).any(axis=0, keepdims=True))).astype(np.float32)
 
-    return slice(start, start + crop)
+        data = np.nan_to_num(data, nan=-1.0)
+
+        data = torch.from_numpy(data[:, np.newaxis, :, :])
+        if self.return_mask:
+            mask = torch.from_numpy(mask.values[:, np.newaxis, :, :])
+
+        if self.augment:
+            if self.return_mask:
+                data, mask = self._apply_augmentations(data, mask)
+            else:
+                data = self._apply_augmentations(data)
+
+        if self.return_mask:
+            return {"data": data, "mask": mask}
+        else:
+            return {"data": data}

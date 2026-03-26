@@ -5,7 +5,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "mlcast"
-version = "0.0.1a4"
+version = "0.0.1a5"
 description = "Machine learning weather nowcasting library"
 readme = "README.md"
 keywords = [ "machine-learning", "meteorology", "nowcasting", "precipitation", "pytorch", "radar", "weather" ]
@@ -32,11 +32,14 @@ classifiers = [
 ]
 
 dependencies = [
+  "fiddle>=0.3.0",
   "fire>=0.7",
   "ipykernel>=6.29.5",
-  "lightning>=2.5.2",
   "numpy>=2.2.6",
+  "pandas>=2.0",
+  "pytorch-lightning>=2.0",
   "torch>=2.7.1",
+  "torchvision>=0.20",
   "xarray>=2025.6.1",
   "zarr<=3",
 ]
