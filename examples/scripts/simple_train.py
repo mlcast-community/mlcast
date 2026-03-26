@@ -1,49 +1,39 @@
 """Simple training script for MLCast using Fiddle configuration.
 
-Example usage::
+This script shows the programmatic API for configuring and running
+experiments. For CLI usage with arbitrary overrides, use::
 
-    python simple_train.py --zarr-path /path/to/data.zarr \
-                           --csv-path /path/to/sampled.csv \
-                           --variable-name RR
-
-For advanced customization, modify the config before building::
-
-    cfg = convgru_experiment.as_buildable(zarr_path=..., csv_path=...)
-    cfg.pl_module.num_blocks = 4
-    cfg.data.batch_size = 32
-    cfg.trainer.max_epochs = 50
-    fdl.build(cfg).run()
+    python -m mlcast \\
+        --config config:convgru_experiment \\
+        --config set:data.zarr_path=/path/to/data.zarr \\
+        --config set:data.csv_path=/path/to/sampled.csv \\
+        --config set:data.batch_size=32 \\
+        --config set:trainer.max_epochs=50
 """
-
-import argparse
 
 import fiddle as fdl
 
-from mlcast.configs import convgru_experiment, train_from_config
+from mlcast.configs import convgru_experiment
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MLCast simple training")
-    parser.add_argument("--zarr-path", type=str, required=True, help="Path to Zarr dataset")
-    parser.add_argument("--csv-path", type=str, required=True, help="Path to sampled datacubes CSV")
-    parser.add_argument("--variable-name", type=str, default="RR", help="Variable name in Zarr store")
-    parser.add_argument("--max-epochs", type=int, default=100, help="Maximum number of epochs")
-    parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
-    parser.add_argument("--num-workers", type=int, default=8, help="Number of data loading workers")
-    args = parser.parse_args()
-
+    # Get the config graph — all parameters are overridable via dot-access
     cfg = convgru_experiment.as_buildable(
-        zarr_path=args.zarr_path,
-        csv_path=args.csv_path,
-        variable_name=args.variable_name,
+        zarr_path="/path/to/data.zarr",
+        csv_path="/path/to/sampled.csv",
+        variable_name="RR",
     )
 
-    # Apply CLI overrides
-    cfg.data.batch_size = args.batch_size
-    cfg.data.num_workers = args.num_workers
-    cfg.trainer.max_epochs = args.max_epochs
+    # Override any nested parameter before building
+    cfg.data.batch_size = 32
+    cfg.data.num_workers = 16
+    cfg.pl_module.num_blocks = 4
+    cfg.pl_module.ensemble_size = 4
+    cfg.trainer.max_epochs = 50
 
-    train_from_config(cfg)
+    # Build all objects and run training + testing
+    experiment = fdl.build(cfg)
+    experiment.run()
 
 
 if __name__ == "__main__":

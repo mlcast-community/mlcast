@@ -1,37 +1,50 @@
-"""Entry point for ``python -m mlcast``."""
+"""Entry point for ``python -m mlcast``.
 
-import argparse
+Uses Fiddle's absl_flags integration to allow overriding any config
+parameter from the command line.
 
-from .configs import convgru_experiment, train_from_config
+Usage examples::
+
+    # Train with default config (must override data paths):
+    python -m mlcast \\
+        --config config:convgru_experiment \\
+        --config set:data.zarr_path=/path/to/data.zarr \\
+        --config set:data.csv_path=/path/to/sampled.csv \\
+        --config set:data.variable_name=RR
+
+    # Override training parameters:
+    python -m mlcast \\
+        --config config:convgru_experiment \\
+        --config set:data.zarr_path=/path/to/data.zarr \\
+        --config set:data.csv_path=/path/to/sampled.csv \\
+        --config set:data.batch_size=32 \\
+        --config set:data.num_workers=16 \\
+        --config set:pl_module.num_blocks=4 \\
+        --config set:pl_module.ensemble_size=4 \\
+        --config set:trainer.max_epochs=50
+"""
+
+import sys
+
+from absl import app
+from fiddle import absl_flags
+
+from . import configs  # noqa: F401 — module must be importable for absl_flags
+
+_CONFIG = absl_flags.DEFINE_fiddle_config(
+    "config",
+    default_module=sys.modules[f"{__package__}.configs"],
+    help_string="Experiment configuration. Use --config config:convgru_experiment to load defaults.",
+)
 
 
-def main() -> None:
-    """Run a training experiment.
+def main(argv: list[str]) -> None:
+    """Run training with the Fiddle config from command-line flags."""
+    del argv
+    from .configs import train_from_config
 
-    Usage examples::
-
-        # Run with defaults (override zarr_path and csv_path programmatically)
-        python -m mlcast
-
-        # Modify config programmatically in a script:
-        #   cfg = convgru_experiment.as_buildable(zarr_path=..., csv_path=...)
-        #   cfg.pl_module.num_blocks = 4
-        #   cfg.data.batch_size = 32
-        #   fdl.build(cfg).run()
-    """
-    parser = argparse.ArgumentParser(description="MLCast training")
-    parser.add_argument("--zarr-path", type=str, default="./data/radar.zarr", help="Path to Zarr dataset")
-    parser.add_argument("--csv-path", type=str, default="./data/sampled_datacubes.csv", help="Path to sampled CSV")
-    parser.add_argument("--variable-name", type=str, default="RR", help="Variable name in Zarr store")
-    args = parser.parse_args()
-
-    cfg = convgru_experiment.as_buildable(
-        zarr_path=args.zarr_path,
-        csv_path=args.csv_path,
-        variable_name=args.variable_name,
-    )
-    train_from_config(cfg)
+    train_from_config(_CONFIG.value)
 
 
 if __name__ == "__main__":
-    main()
+    app.run(main)

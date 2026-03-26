@@ -123,9 +123,6 @@ def config_to_dict(cfg: fdl.Config) -> dict:
 def train_from_config(cfg: fdl.Config) -> None:
     """Build and run an experiment from a Fiddle config.
 
-    Handles dynamic naming for TensorBoard logs and checkpoints,
-    saves the config as YAML, and runs training + testing.
-
     Parameters
     ----------
     cfg : fdl.Config
