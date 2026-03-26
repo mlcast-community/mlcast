@@ -43,7 +43,7 @@ def main(argv: list[str]) -> None:
     remaining = argv[1:]
 
     if not remaining:
-        print(f"Usage: python -m mlcast <command> [flags]\n\nAvailable commands: {', '.join(COMMANDS)}")
+        print(f"Usage: mlcast <command> [flags]\n\nAvailable commands: {', '.join(COMMANDS)}")
         sys.exit(1)
 
     command = remaining[0]
@@ -60,5 +60,10 @@ def main(argv: list[str]) -> None:
         sys.exit(1)
 
 
-if __name__ == "__main__":
+def cli() -> None:
+    """Console script entry point for ``mlcast`` command."""
     app.run(main)
+
+
+if __name__ == "__main__":
+    cli()
