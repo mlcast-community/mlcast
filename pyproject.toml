@@ -17,7 +17,7 @@ authors = [
   { name = "Gabriele Franch", email = "franch@fbk.eu" },
   { name = "Leif Denby", email = "lcd@dmi.dk" },
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Intended Audience :: Science/Research",
@@ -46,7 +46,7 @@ dependencies = [
   "torch>=2.7.1",
   "torchvision>=0.20",
   "xarray>=2025.6.1",
-  "zarr<=3",
+  "zarr>=3",
 ]
 
 scripts.mlcast = "mlcast.__main__:cli"
