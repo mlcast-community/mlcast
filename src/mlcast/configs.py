@@ -5,11 +5,13 @@ Fiddle config graphs. Override any parameter before calling ``fdl.build()``.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import fiddle as fdl
 import fiddle.experimental.auto_config
 import pytorch_lightning as pl
 import torch
+import yaml
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
@@ -112,11 +114,27 @@ def convgru_experiment(
     )
 
 
+def _make_serializable(value: object) -> object:
+    """Convert a value to a YAML-serializable form."""
+    if isinstance(value, type):
+        return f"{value.__module__}.{value.__qualname__}"
+    if isinstance(value, dict):
+        return {k: _make_serializable(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_make_serializable(v) for v in value]
+    return value
+
+
 def config_to_dict(cfg: fdl.Config) -> dict:
     """Recursively convert a Fiddle config to a nested dictionary."""
-    result = {}
+    result = {"__fn__": f"{fdl.get_callable(cfg).__module__}.{fdl.get_callable(cfg).__qualname__}"}
     for key, value in fdl.ordered_arguments(cfg).items():
-        result[key] = config_to_dict(value) if isinstance(value, fdl.Config) else value
+        if isinstance(value, fdl.Config):
+            result[key] = config_to_dict(value)
+        elif isinstance(value, list | tuple):
+            result[key] = [config_to_dict(v) if isinstance(v, fdl.Config) else _make_serializable(v) for v in value]
+        else:
+            result[key] = _make_serializable(value)
     return result
 
 
@@ -129,4 +147,12 @@ def train_from_config(cfg: fdl.Config) -> None:
         Fiddle configuration as returned by :func:`convgru_experiment`.
     """
     experiment = fdl.build(cfg)
+
+    # Save config YAML to the trainer's log directory
+    log_dir = Path(experiment.trainer.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    config_path = log_dir / "config.yaml"
+    config_path.write_text(yaml.dump(config_to_dict(cfg), default_flow_style=False, sort_keys=False))
+    print(f"Config saved to {config_path}")
+
     experiment.run()
