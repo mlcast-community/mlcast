@@ -23,7 +23,6 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -32,33 +31,39 @@ classifiers = [
 ]
 
 dependencies = [
-  "absl-py>=2.4.0",
-  "etils>=1.13.0",
-  "fiddle>=0.3.0",
+  "absl-py>=2.4",
+  "cf-xarray>=0.10",
+  "etils>=1.13",
+  "fiddle>=0.3",
   "fire>=0.7",
-  "importlib-resources>=5.0",
+  "importlib-resources>=5",
   "ipykernel>=6.29.5",
   "numpy>=2.2.6",
-  "pyyaml>=6.0",
-  "pandas>=2.0",
-  "pytorch-lightning>=2.0",
-  "tensorboard>=2.20.0",
+  "pandas>=2",
+  "pytorch-lightning>=2",
+  "pyyaml>=6",
+  "tensorboard>=2.20",
   "torch>=2.7.1",
   "torchvision>=0.20",
   "xarray>=2025.6.1",
   "zarr>=3",
 ]
 
-scripts.mlcast = "mlcast.__main__:cli"
-
 optional-dependencies.dev = [
+  "aiohttp>=3.9.3",
+  "fsspec>=2024.2",
   "pre-commit>=3.5",
+  "pytest>=8",
+  "pytest-cov>=4.1",
   "ruff>=0.8",
+  "s3fs>=2024.2",
 ]
 urls.Documentation = "https://github.com/mlcast-community/mlcast"
 urls.Homepage = "https://github.com/mlcast-community/mlcast"
 urls.Issues = "https://github.com/mlcast-community/mlcast/issues"
 urls.Repository = "https://github.com/mlcast-community/mlcast"
+
+scripts.mlcast = "mlcast.__main__:cli"
 
 [tool.ruff]
 line-length = 120
