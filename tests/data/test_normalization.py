@@ -1,6 +1,7 @@
 import numpy as np
 
 from mlcast.data.normalization import (
+    NORMALIZATION_REGISTRY,
     normalized_to_rainrate,
     rainrate_to_normalized,
 )
@@ -26,3 +27,9 @@ def test_rainrate_to_normalized_and_inverse():
     # Check bounds
     assert np.all(normalized >= -1.0)
     assert np.all(normalized <= 1.0)
+
+
+def test_normalization_registry():
+    """Verify that the NORMALIZATION_REGISTRY maps CF standard names to Callables correctly."""
+    assert "rainfall_rate" in NORMALIZATION_REGISTRY
+    assert NORMALIZATION_REGISTRY["rainfall_rate"] == rainrate_to_normalized

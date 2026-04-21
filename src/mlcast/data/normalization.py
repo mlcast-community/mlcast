@@ -116,3 +116,8 @@ def normalized_to_rainrate(normalized: np.ndarray) -> np.ndarray:
     """
     reflectivity = denormalize_reflectivity(normalized)
     return reflectivity_to_rainrate(reflectivity)
+
+
+NORMALIZATION_REGISTRY = {
+    "rainfall_rate": rainrate_to_normalized,
+}
