@@ -16,6 +16,7 @@ from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, Mode
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from .data.source_data_module import SourceDataDataModule
+from .data.source_datasets import SourceDataPrecomputedSamplingDataset
 from .models.base import NowcastLightningModule
 from .modules.convgru_modules import ConvGruModel
 
@@ -66,16 +67,20 @@ def training_experiment(
     Experiment
         Configured experiment with model, data, and trainer.
     """
-    data = SourceDataDataModule(
+    dataset_factory = fdl.Partial(
+        SourceDataPrecomputedSamplingDataset,
         zarr_path=zarr_path,
         csv_path=csv_path,
         standard_names=standard_names or ["rainfall_rate"],
         steps=18,
-        train_ratio=0.70,
-        val_ratio=0.15,
         return_mask=True,
         deterministic=False,
-        augment=True,
+    )
+
+    data = SourceDataDataModule(
+        dataset_factory=dataset_factory,
+        train_ratio=0.70,
+        val_ratio=0.15,
         batch_size=16,
         num_workers=8,
         pin_memory=True,

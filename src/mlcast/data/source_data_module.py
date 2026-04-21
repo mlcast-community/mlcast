@@ -1,131 +1,91 @@
 """PyTorch Lightning data module for spatio-temporal datasets.
 
-Handles train/val/test splitting and DataLoader creation from a single
-Zarr store and CSV coordinate file produced by mlcast-dataset-sampler.
+Handles train/val/test splitting and DataLoader creation from an injected
+dataset factory.
 """
 
-import pandas as pd
-import pytorch_lightning as pl
-from torch.utils.data import DataLoader
+from collections.abc import Callable
+from typing import Any
 
-from .source_datasets import SourceDataPrecomputedSamplingDataset
+import pytorch_lightning as pl
+from torch.utils.data import DataLoader, Dataset
 
 
 class SourceDataDataModule(pl.LightningDataModule):
     """PyTorch Lightning data module for spatio-temporal datasets.
 
-    Handles train/val/test splitting and DataLoader creation from a single
-    Zarr store and CSV coordinate file.
+    Handles train/val/test splitting and DataLoader creation by utilizing
+    an injected ``dataset_factory``.
 
     Parameters
     ----------
-    zarr_path : str
-        Path to the Zarr dataset.
-    csv_path : str
-        Path to the CSV file with crop coordinates.
-    standard_names : list of str
-        Names of the standard CF variables to load from the Zarr store.
-    steps : int
-        Number of timesteps per sample.
+    dataset_factory : Callable[..., Dataset]
+        A factory function (e.g., ``fdl.Partial``) that returns a Dataset instance.
+        It must accept ``time_slice`` and ``augment`` as keyword arguments.
     train_ratio : float, optional
         Fraction of data used for training. Default is ``0.7``.
     val_ratio : float, optional
         Fraction of data used for validation. Default is ``0.15``.
-    return_mask : bool, optional
-        Whether to return NaN masks. Default is ``False``.
-    deterministic : bool, optional
-        Whether to use fixed random seeds. Default is ``False``.
-    augment : bool, optional
-        Whether to apply data augmentation (training set only). Default is
-        ``True``.
-    width : int, optional
-        Spatial width of each crop. Default is ``256``.
-    height : int, optional
-        Spatial height of each crop. Default is ``256``.
-    time_depth : int, optional
-        Number of timesteps in the sampled window. Default is ``24``.
-    **dataloader_kwargs
-        Additional keyword arguments forwarded to ``DataLoader`` (e.g.
+    **dataloader_kwargs : Any
+        Additional keyword arguments forwarded to ``DataLoader`` (e.g.,
         ``batch_size``, ``num_workers``, ``pin_memory``).
     """
 
     def __init__(
         self,
-        zarr_path,
-        csv_path,
-        standard_names,
-        steps,
-        train_ratio=0.7,
-        val_ratio=0.15,
-        return_mask=False,
-        deterministic=False,
-        augment=True,
-        width=256,
-        height=256,
-        time_depth=24,
-        **dataloader_kwargs,
-    ):
+        dataset_factory: Callable[..., Dataset],
+        train_ratio: float = 0.7,
+        val_ratio: float = 0.15,
+        **dataloader_kwargs: Any,
+    ) -> None:
         super().__init__()
-        self.zarr_path = zarr_path
-        self.csv_path = csv_path
-        self.standard_names = standard_names
-        self.steps = steps
+        self.dataset_factory = dataset_factory
         self.train_ratio = train_ratio
         self.val_ratio = val_ratio
         self.dataloader_kwargs = dataloader_kwargs
-        self.return_mask = return_mask
-        self.deterministic = deterministic
-        self.augment = augment
-        self.width = width
-        self.height = height
-        self.time_depth = time_depth
 
-    def setup(self, stage=None):
+    def setup(self, stage: str | None = None) -> None:
         """Create train, validation, and test datasets.
 
-        Splits are chronological: the first ``train_ratio`` fraction is used
-        for training, the next ``val_ratio`` for validation, and the rest for
-        testing. Augmentation is only applied to the training set.
+        Splits are chronological based on the total available time elements
+        determined from a base instance of the dataset.
         """
-        coords = pd.read_csv(self.csv_path).sort_values("t")
-        n = len(coords)
+        # Instantiate a base dataset to determine total temporal length
+        base_dataset = self.dataset_factory()
+
+        if hasattr(base_dataset, "coords"):
+            # Precomputed sampling dataset uses coords length
+            n = len(base_dataset.coords)
+        elif hasattr(base_dataset, "ds"):
+            # Random sampling dataset uses the full time dimension of the Zarr store
+            n = base_dataset.ds.time.size
+        else:
+            raise ValueError("Dataset must have 'coords' or 'ds.time' to determine temporal length.")
 
         train_end = int(n * self.train_ratio)
         val_end = int(n * (self.train_ratio + self.val_ratio))
 
-        common_kwargs = dict(
-            zarr_path=self.zarr_path,
-            csv_path=self.csv_path,
-            standard_names=self.standard_names,
-            steps=self.steps,
-            return_mask=self.return_mask,
-            deterministic=self.deterministic,
-            width=self.width,
-            height=self.height,
-            time_depth=self.time_depth,
-        )
-
-        self.train_dataset = SourceDataPrecomputedSamplingDataset(
-            **common_kwargs,
-            augment=self.augment,
+        self.train_dataset = self.dataset_factory(
             time_slice=slice(0, train_end),
+            augment=True,
         )
-        self.val_dataset = SourceDataPrecomputedSamplingDataset(
-            **common_kwargs,
-            augment=False,
+        self.val_dataset = self.dataset_factory(
             time_slice=slice(train_end, val_end),
-        )
-        self.test_dataset = SourceDataPrecomputedSamplingDataset(
-            **common_kwargs,
             augment=False,
+        )
+        self.test_dataset = self.dataset_factory(
             time_slice=slice(val_end, n),
+            augment=False,
         )
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
+        """Return the training DataLoader."""
         return DataLoader(self.train_dataset, shuffle=True, **self.dataloader_kwargs)
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
+        """Return the validation DataLoader."""
         return DataLoader(self.val_dataset, shuffle=False, **self.dataloader_kwargs)
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> DataLoader:
+        """Return the test DataLoader."""
         return DataLoader(self.test_dataset, shuffle=False, **self.dataloader_kwargs)

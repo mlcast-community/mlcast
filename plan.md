@@ -44,8 +44,8 @@
    - [x] Update `__getitem__` to use `self.ds.cf[std_name]` to extract arrays, and `NORMALIZATION_REGISTRY[std_name]` to normalize them, before stacking along the channel dimension.
 - [x] **New Dataset**:
    - [x] Create `SourceDataRandomSamplingDataset` which performs on-the-fly random spatial and temporal slicing.
-- [ ] **DataModule Implementation Details**:
-   - [ ] Inject `dataset_factory` (a `Callable[..., Dataset]`) into `SourceDataDataModule.__init__` so it doesn't hardcode dataset instantiation.
+- [x] **DataModule Implementation Details**:
+   - [x] Inject `dataset_factory` (a `Callable[..., Dataset]`) into `SourceDataDataModule.__init__` so it doesn't hardcode dataset instantiation.
 - [ ] **Tests**: Create `tests/data/test_source_datasets.py` and `tests/data/test_data_module.py`.
    - [ ] Test datasets using the `italian_dataset` fixture to ensure they output `(Time, Channels, Height, Width)` and use `cf_xarray` correctly.
    - [ ] Test DataModule splits with a mock dataset factory.
