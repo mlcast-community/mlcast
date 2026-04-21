@@ -30,8 +30,8 @@
    - [x] Ensure the raw `EncoderDecoder` logic acts cleanly as an interchangeable module (e.g., rename to `ConvGruModel` or expose it cleanly).
 
 ## Phase 2B: Typing and Documentation
-- [ ] Add rigorous NumPy-style docstrings to all methods in `base.py` and `convgru_modules.py`.
-- [ ] Add `jaxtyping` annotations to all `torch.nn.Module` classes to strictly define input/output tensor shapes and dtypes.
+- [x] Add rigorous NumPy-style docstrings to all methods in `base.py` and `convgru_modules.py`.
+- [x] Add `jaxtyping` annotations to all `torch.nn.Module` classes to strictly define input/output tensor shapes and dtypes.
 
 ## Phase 3: Decoupling the Data Layer (Generalized Source Data)
 - [ ] **Tests**: Create `tests/data/test_source_datasets.py` and `tests/data/test_data_module.py`.

@@ -7,6 +7,8 @@ decoder inputs.
 
 import torch
 import torch.nn as nn
+from beartype import beartype
+from jaxtyping import Float, jaxtyped
 
 
 class ConvGRUCell(nn.Module):
@@ -27,7 +29,9 @@ class ConvGRUCell(nn.Module):
         Convolutional layer class to use. Default is ``nn.Conv2d``.
     """
 
-    def __init__(self, input_size: int, hidden_size: int, kernel_size: int = 3, conv_layer: nn.Module = nn.Conv2d):
+    def __init__(
+        self, input_size: int, hidden_size: int, kernel_size: int = 3, conv_layer: type[nn.Module] = nn.Conv2d
+    ):
         super().__init__()
         padding = kernel_size // 2
         self.input_size = input_size
@@ -35,31 +39,39 @@ class ConvGRUCell(nn.Module):
         self.combined_gates = conv_layer(input_size + hidden_size, 2 * hidden_size, kernel_size, padding=padding)
         self.out_gate = conv_layer(input_size + hidden_size, hidden_size, kernel_size, padding=padding)
 
-    def forward(self, inpt: torch.Tensor | None = None, h_s: torch.Tensor | None = None) -> torch.Tensor:
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self,
+        inpt: Float[torch.Tensor, "batch in_channels height width"] | None = None,
+        h_s: Float[torch.Tensor, "batch hidden_channels height width"] | None = None,
+    ) -> Float[torch.Tensor, "batch hidden_channels height width"]:
         """Forward the ConvGRU cell for a single timestep.
 
         Parameters
         ----------
-        inpt : torch.Tensor or None, optional
-            Input tensor of shape ``(B, input_size, H, W)``.
-        h_s : torch.Tensor or None, optional
-            Hidden state tensor of shape ``(B, hidden_size, H, W)``.
+        inpt : Float[torch.Tensor, "batch in_channels height width"] or None, optional
+            Input tensor.
+        h_s : Float[torch.Tensor, "batch hidden_channels height width"] or None, optional
+            Hidden state tensor.
 
         Returns
         -------
-        new_state : torch.Tensor
-            Updated hidden state of shape ``(B, hidden_size, H, W)``.
+        new_state : Float[torch.Tensor, "batch hidden_channels height width"]
+            Updated hidden state.
         """
         if h_s is None and inpt is None:
             raise ValueError("Both input and state can't be None")
-        elif h_s is None:
+        elif h_s is None and inpt is not None:
             h_s = torch.zeros(
                 inpt.size(0), self.hidden_size, inpt.size(2), inpt.size(3), dtype=inpt.dtype, device=inpt.device
             )
-        elif inpt is None:
+        elif inpt is None and h_s is not None:
             inpt = torch.zeros(
                 h_s.size(0), self.input_size, h_s.size(2), h_s.size(3), dtype=h_s.dtype, device=h_s.device
             )
+
+        assert inpt is not None
+        assert h_s is not None
 
         gamma, beta = torch.chunk(self.combined_gates(torch.cat([inpt, h_s], dim=1)), 2, dim=1)
         update = torch.sigmoid(gamma)
@@ -86,25 +98,35 @@ class ConvGRU(nn.Module):
         Convolutional layer class to use. Default is ``nn.Conv2d``.
     """
 
-    def __init__(self, input_size: int, hidden_size: int, kernel_size: int = 3, conv_layer: nn.Module = nn.Conv2d):
+    def __init__(
+        self, input_size: int, hidden_size: int, kernel_size: int = 3, conv_layer: type[nn.Module] = nn.Conv2d
+    ):
         super().__init__()
         self.cell = ConvGRUCell(input_size, hidden_size, kernel_size, conv_layer)
 
-    def forward(self, x: torch.Tensor | None = None, h: torch.Tensor | None = None) -> torch.Tensor:
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch time in_channels height width"] | None = None,
+        h: Float[torch.Tensor, "batch hidden_channels height width"] | None = None,
+    ) -> Float[torch.Tensor, "batch time hidden_channels height width"]:
         """Unroll the ConvGRU cell over the sequence (time) dimension.
 
         Parameters
         ----------
-        x : torch.Tensor or None, optional
-            Input tensor of shape ``(B, T, input_size, H, W)``.
-        h : torch.Tensor or None, optional
-            Initial hidden state of shape ``(B, hidden_size, H, W)``.
+        x : Float[torch.Tensor, "batch time in_channels height width"] or None, optional
+            Input sequence.
+        h : Float[torch.Tensor, "batch hidden_channels height width"] or None, optional
+            Initial hidden state.
 
         Returns
         -------
-        hidden_states : torch.Tensor
-            Stacked hidden states of shape ``(B, T, hidden_size, H, W)``.
+        hidden_states : Float[torch.Tensor, "batch time hidden_channels height width"]
+            Stacked hidden states.
         """
+        if x is None:
+            raise ValueError("Input sequence x cannot be None")
+
         h_s = []
         for i in range(x.size(1)):
             h = self.cell(x[:, i], h)
@@ -128,23 +150,27 @@ class EncoderBlock(nn.Module):
         Convolutional layer class to use. Default is ``nn.Conv2d``.
     """
 
-    def __init__(self, input_size: int, kernel_size: int = 3, conv_layer: nn.Module = nn.Conv2d):
+    def __init__(self, input_size: int, kernel_size: int = 3, conv_layer: type[nn.Module] = nn.Conv2d):
         super().__init__()
         self.convgru = ConvGRU(input_size, input_size, kernel_size, conv_layer)
         self.down = nn.PixelUnshuffle(2)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, x: Float[torch.Tensor, "batch time in_channels height width"]
+    ) -> Float[torch.Tensor, "batch time out_channels out_height out_width"]:
         """Forward the encoder block.
 
         Parameters
         ----------
-        x : torch.Tensor
-            Input tensor of shape ``(B, T, C, H, W)``.
+        x : Float[torch.Tensor, "batch time in_channels height width"]
+            Input sequence.
 
         Returns
         -------
-        out : torch.Tensor
-            Downsampled tensor of shape ``(B, T, C*4, H/2, W/2)``.
+        out : Float[torch.Tensor, "batch time out_channels out_height out_width"]
+            Downsampled tensor, where out_channels is 4*in_channels,
+            and spatial dimensions are halved.
         """
         x = self.convgru(x)
         x = self.down(x)
@@ -182,17 +208,20 @@ class Encoder(nn.Module):
         self.channel_sizes = [input_channels * 4**i for i in range(num_blocks)]
         self.blocks = nn.ModuleList([EncoderBlock(self.channel_sizes[i], **kwargs) for i in range(num_blocks)])
 
-    def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, x: Float[torch.Tensor, "batch time channels height width"]
+    ) -> list[Float[torch.Tensor, "batch time _ _ _"]]:
         """Forward the encoder through all blocks.
 
         Parameters
         ----------
-        x : torch.Tensor
-            Input tensor of shape ``(B, T, C, H, W)``.
+        x : Float[torch.Tensor, "batch time channels height width"]
+            Input sequence.
 
         Returns
         -------
-        hidden_states : list of torch.Tensor
+        hidden_states : list of Float[torch.Tensor, "batch time _ _ _"]
             Hidden state tensors from each block, with progressively reduced
             spatial dimensions.
         """
@@ -221,25 +250,33 @@ class DecoderBlock(nn.Module):
         Convolutional layer class to use. Default is ``nn.Conv2d``.
     """
 
-    def __init__(self, input_size: int, hidden_size: int, kernel_size: int = 3, conv_layer: nn.Module = nn.Conv2d):
+    def __init__(
+        self, input_size: int, hidden_size: int, kernel_size: int = 3, conv_layer: type[nn.Module] = nn.Conv2d
+    ):
         super().__init__()
         self.convgru = ConvGRU(input_size, hidden_size, kernel_size, conv_layer)
         self.up = nn.PixelShuffle(2)
 
-    def forward(self, x: torch.Tensor, hidden_state: torch.Tensor) -> torch.Tensor:
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch time in_channels height width"],
+        hidden_state: Float[torch.Tensor, "batch time in_channels height width"],
+    ) -> Float[torch.Tensor, "batch time out_channels out_height out_width"]:
         """Forward the decoder block.
 
         Parameters
         ----------
-        x : torch.Tensor
-            Input tensor of shape ``(B, T, C, H, W)``.
-        hidden_state : torch.Tensor
+        x : Float[torch.Tensor, "batch time in_channels height width"]
+            Input sequence.
+        hidden_state : Float[torch.Tensor, "batch time in_channels height width"]
             Hidden state from the corresponding encoder block.
 
         Returns
         -------
-        out : torch.Tensor
-            Upsampled tensor of shape ``(B, T, hidden_size // 4, H*2, W*2)``.
+        out : Float[torch.Tensor, "batch time out_channels out_height out_width"]
+            Upsampled tensor, where out_channels is in_channels / 4,
+            and spatial dimensions are doubled.
         """
         x = self.convgru(x, hidden_state)
         x = self.up(x)
@@ -268,19 +305,24 @@ class Decoder(nn.Module):
             [DecoderBlock(self.channel_sizes[i], self.channel_sizes[i], **kwargs) for i in range(num_blocks)]
         )
 
-    def forward(self, x: torch.Tensor, hidden_states: list[torch.Tensor]) -> torch.Tensor:
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch time hidden_channels height width"],
+        hidden_states: list[Float[torch.Tensor, "batch time _ _ _"]],
+    ) -> Float[torch.Tensor, "batch time out_channels out_height out_width"]:
         """Forward the decoder through all blocks.
 
         Parameters
         ----------
-        x : torch.Tensor
-            Input tensor of shape ``(B, T, C, H, W)``.
-        hidden_states : list of torch.Tensor
+        x : Float[torch.Tensor, "batch time hidden_channels height width"]
+            Initial decoder input (usually zeros or noise).
+        hidden_states : list of Float[torch.Tensor, "batch time _ _ _"]
             Hidden states from the encoder (in reverse order), one per block.
 
         Returns
         -------
-        out : torch.Tensor
+        out : Float[torch.Tensor, "batch time out_channels out_height out_width"]
             Output tensor at original spatial resolution.
         """
         for block, hidden_state in zip(self.blocks, hidden_states, strict=True):
@@ -316,13 +358,16 @@ class ConvGruModel(nn.Module):
         self.encoder = Encoder(input_channels, num_blocks, **kwargs)
         self.decoder = Decoder(input_channels, num_blocks, **kwargs)
 
-    def forward(self, x: torch.Tensor, steps: int, ensemble_size: int = 1) -> torch.Tensor:
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, x: Float[torch.Tensor, "batch time channels height width"], steps: int, ensemble_size: int = 1
+    ) -> Float[torch.Tensor, "batch steps out_channels height width"]:
         """Forward the encoder-decoder model.
 
         Parameters
         ----------
-        x : torch.Tensor
-            Input tensor of shape ``(B, T, C, H, W)``.
+        x : Float[torch.Tensor, "batch time channels height width"]
+            Input sequence.
         steps : int
             Number of future timesteps to forecast.
         ensemble_size : int, optional
@@ -331,10 +376,8 @@ class ConvGruModel(nn.Module):
 
         Returns
         -------
-        preds : torch.Tensor
-            Forecast tensor. Shape is ``(B, steps, C, H, W)`` when
-            ``ensemble_size == 1``, or
-            ``(B, steps, ensemble_size * C, H, W)`` when ``ensemble_size > 1``.
+        preds : Float[torch.Tensor, "batch steps out_channels height width"]
+            Forecast tensor.
         """
         encoded = self.encoder(x)
 

@@ -32,12 +32,14 @@ classifiers = [
 
 dependencies = [
   "absl-py>=2.4",
+  "beartype>=0.18",
   "cf-xarray>=0.10",
   "etils>=1.13",
   "fiddle>=0.3",
   "fire>=0.7",
   "importlib-resources>=5",
   "ipykernel>=6.29.5",
+  "jaxtyping>=0.2",
   "numpy>=2.2.6",
   "pandas>=2",
   "pytorch-lightning>=2",
@@ -52,6 +54,7 @@ dependencies = [
 optional-dependencies.dev = [
   "aiohttp>=3.9.3",
   "fsspec>=2024.2",
+  "mypy>=1",
   "pre-commit>=3.5",
   "pytest>=8",
   "pytest-cov>=4.1",
@@ -81,7 +84,7 @@ lint.select = [
   "UP", # pyupgrade
   "W",  # pycodestyle warnings
 ]
-lint.ignore = [  ]
+lint.ignore = [ "F722" ]
 
 [tool.mypy]
 strict = false
