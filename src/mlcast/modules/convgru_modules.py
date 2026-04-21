@@ -288,7 +288,7 @@ class Decoder(nn.Module):
         return x
 
 
-class EncoderDecoder(nn.Module):
+class ConvGruModel(nn.Module):
     """Full encoder-decoder model for spatio-temporal forecasting.
 
     Encodes an input sequence into multi-scale hidden states and decodes
@@ -297,21 +297,26 @@ class EncoderDecoder(nn.Module):
 
     Parameters
     ----------
-    channels : int, optional
-        Number of input/output channels. Default is ``1``.
+    input_channels : int, optional
+        Number of input channels. Default is ``1``.
     num_blocks : int, optional
         Number of encoder and decoder blocks. Default is ``4``.
+    noisy_decoder : bool, optional
+        If ``True``, feed random noise as decoder input. Default is ``False``.
     **kwargs
         Additional keyword arguments forwarded to :class:`Encoder` and
         :class:`Decoder`.
     """
 
-    def __init__(self, channels: int = 1, num_blocks: int = 4, **kwargs):
+    def __init__(self, input_channels: int = 1, num_blocks: int = 4, noisy_decoder: bool = False, **kwargs):
         super().__init__()
-        self.encoder = Encoder(channels, num_blocks, **kwargs)
-        self.decoder = Decoder(channels, num_blocks, **kwargs)
+        self.input_channels = input_channels
+        self.num_blocks = num_blocks
+        self.noisy_decoder = noisy_decoder
+        self.encoder = Encoder(input_channels, num_blocks, **kwargs)
+        self.decoder = Decoder(input_channels, num_blocks, **kwargs)
 
-    def forward(self, x: torch.Tensor, steps: int, noisy_decoder: bool = False, ensemble_size: int = 1) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, steps: int, ensemble_size: int = 1) -> torch.Tensor:
         """Forward the encoder-decoder model.
 
         Parameters
@@ -320,8 +325,6 @@ class EncoderDecoder(nn.Module):
             Input tensor of shape ``(B, T, C, H, W)``.
         steps : int
             Number of future timesteps to forecast.
-        noisy_decoder : bool, optional
-            If ``True``, feed random noise as decoder input. Default is ``False``.
         ensemble_size : int, optional
             Number of ensemble members to generate. When ``> 1``, the decoder
             is always run with noisy inputs. Default is ``1``.
@@ -348,7 +351,7 @@ class EncoderDecoder(nn.Module):
                 preds.append(decoded)
             return torch.cat(preds, dim=2)
         else:
-            x_dec_func = torch.randn if noisy_decoder else torch.zeros
+            x_dec_func = torch.randn if self.noisy_decoder else torch.zeros
             x_dec = x_dec_func(x_dec_shape, dtype=encoded[-1].dtype, device=encoded[-1].device)
             decoded = self.decoder(x_dec, last_hidden_per_block)
             return decoded

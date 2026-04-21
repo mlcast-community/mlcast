@@ -23,11 +23,15 @@
    - [x] Change the default `TensorBoardLogger` name from `"convgru"` to `"mlcast"`.
    - [x] Retain `config_to_dict` since Fiddle lacks a native recursive YAML serializer.
 
-## Phase 2: Decoupling the Architecture (PR Feedback)
-- [ ] **Generic Lightning Wrapper (`src/mlcast/models/base.py` or similar)**:
-   - [ ] Refactor `RadarLightningModel` to be a general-purpose wrapper that takes an injected PyTorch `nn.Module` (the network architecture) instead of hardcoding `EncoderDecoder`.
-- [ ] **Network Architectures**:
-   - [ ] Ensure the raw `EncoderDecoder` logic acts cleanly as an interchangeable module (e.g., rename to `ConvGruModel` or expose it cleanly).
+## Phase 2A: Decoupling the Architecture (Structural)
+- [x] **Generic Lightning Wrapper (`src/mlcast/models/base.py` or similar)**:
+   - [x] Refactor `RadarLightningModel` to be a general-purpose wrapper that takes an injected PyTorch `nn.Module` (the network architecture) instead of hardcoding `EncoderDecoder`.
+- [x] **Network Architectures**:
+   - [x] Ensure the raw `EncoderDecoder` logic acts cleanly as an interchangeable module (e.g., rename to `ConvGruModel` or expose it cleanly).
+
+## Phase 2B: Typing and Documentation
+- [ ] Add rigorous NumPy-style docstrings to all methods in `base.py` and `convgru_modules.py`.
+- [ ] Add `jaxtyping` annotations to all `torch.nn.Module` classes to strictly define input/output tensor shapes and dtypes.
 
 ## Phase 3: Decoupling the Data Layer (Generalized Source Data)
 - [ ] **Tests**: Create `tests/data/test_source_datasets.py` and `tests/data/test_data_module.py`.

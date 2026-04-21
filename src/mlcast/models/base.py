@@ -1,188 +1,226 @@
-"""Abstract base classes for nowcasting models.
+"""Generic Lightning module for radar precipitation nowcasting.
 
-This module provides the core API for machine learning-based precipitation
-nowcasting models that all models must implement.
+Wraps an injected PyTorch :class:`nn.Module` (the network architecture) and
+handles training, validation, and test steps including loss computation,
+ensemble generation, and TensorBoard image logging.
 """
 
-import abc
 from typing import Any
 
 import numpy as np
-import pytorch_lightning as L
+import pytorch_lightning as pl
 import torch
-import xarray as xr
-from torch import nn
+
+from mlcast.data.normalization import normalized_to_rainrate, rainrate_to_normalized
+from mlcast.losses import build_loss
+from mlcast.visualization import log_images
 
 
-class NowcastingModelBase(abc.ABC):
-    """Abstract base class for precipitation nowcasting models.
+class NowcastLightningModule(pl.LightningModule):
+    """Generic PyTorch Lightning module for nowcasting.
 
-    This class defines the standard interface that all nowcasting models
-    must implement. It provides a consistent API for training, prediction,
-    and model persistence across different ML approaches.
+    Wraps an injected PyTorch `nn.Module` (the network architecture) and
+    handles training, validation, test steps, loss computation, ensemble
+    generation, and TensorBoard logging.
 
-    Attributes:
-        timestep_length: Time resolution of the model's predictions
-    """
-
-    timestep_length: np.timedelta64 | None = None
-    PLModuleClass: L.LightningModule | None = None
-
-    def __init__(self):
-        """Initialize the nowcasting model."""
-        self.pl_module = self.PLModuleClass() if self.PLModuleClass is not None else None
-
-    @abc.abstractmethod
-    def save(self, path: str, **kwargs: Any) -> None:
-        """Save the trained model to disk.
-
-        Args:
-            path: File path where the model should be saved
-            **kwargs: Additional arguments for model saving
-
-        Note:
-            This method needs to be implemented in concrete subclasses
-            to handle model serialization.
-        """
-        pass
-
-    @abc.abstractmethod
-    def load(self, path: str, **kwargs: Any) -> None:
-        """Load a pre-trained model from disk.
-
-        Args:
-            path: File path to the saved model
-            **kwargs: Additional arguments for model loading
-
-        Note:
-            This method needs to be implemented in concrete subclasses
-            to handle model deserialization.
-        """
-        pass
-
-    @abc.abstractmethod
-    def fit(self, da_rr: xr.DataArray, **kwargs: Any) -> None:
-        """Train the nowcasting model on precipitation data.
-
-        Args:
-            da_rr: xarray DataArray containing precipitation radar data
-                with time, latitude, and longitude dimensions
-            **kwargs: Additional arguments for training (e.g., batch_size, epochs)
-
-        Note:
-            Concrete implementations should:
-            1. Process the input data (scaling, temporal windowing)
-            2. Train the underlying ML model
-            3. Store scaling parameters and timestep information
-        """
-        pass
-
-    @abc.abstractmethod
-    def predict(self, da_rr: xr.DataArray, duration: str, **kwargs: Any) -> xr.DataArray:
-        """Generate precipitation forecasts.
-
-        Args:
-            da_rr: xarray DataArray containing initial precipitation conditions
-            duration: ISO 8601 duration string (e.g., "PT1H" for 1 hour)
-                specifying how far into the future to predict
-            **kwargs: Additional arguments for prediction (e.g., batch_size, device)
-
-        Returns:
-            xarray DataArray containing precipitation predictions with
-            original spatial dimensions plus an "elapsed_time" dimension
-
-        Note:
-            Concrete implementations should:
-            1. Process input data using stored scaling parameters
-            2. Generate predictions using the trained model
-            3. Return results in the original coordinate system
-        """
-        pass
-
-
-class NowcastingLightningModule(L.LightningModule):
-    """Base class for PyTorch Lightning modules used in nowcasting models.
-
-    This class provides a standard interface for training and validation
-    steps, as well as optimizer configuration.
+    Parameters
+    ----------
+    network : torch.nn.Module
+        The PyTorch network architecture to train.
+    ensemble_size : int, optional
+        Number of ensemble members to generate. Default is ``1``.
+    forecast_steps : int or None, optional
+        Number of future timesteps to forecast. Default is ``None``.
+    loss_class : type[torch.nn.Module] or str, optional
+        Loss function class or its string name. Default is ``"mse"``.
+    loss_params : dict or None, optional
+        Keyword arguments for the loss constructor. Default is ``None``.
+    masked_loss : bool, optional
+        Whether to wrap the loss with :class:`MaskedLoss`. Default is ``False``.
+    optimizer_class : type or None, optional
+        Optimizer class. Default is ``None`` (Adam).
+    optimizer_params : dict or None, optional
+        Keyword arguments for the optimizer. Default is ``None``.
+    lr_scheduler_class : type or None, optional
+        Learning rate scheduler class. Default is ``None``.
+    lr_scheduler_params : dict or None, optional
+        Keyword arguments for the LR scheduler. Default is ``None``.
     """
 
     def __init__(
         self,
-        net: nn.Module,
-        loss: nn.Module,
-        optimizer_class: Any | None = None,
-        optimizer_kwargs: dict | None = None,
-        **kwargs: Any,
-    ):
+        network: torch.nn.Module,
+        ensemble_size: int = 1,
+        forecast_steps: type | int | None = None,
+        loss_class: type[torch.nn.Module] | str = "mse",
+        loss_params: dict[str, Any] | None = None,
+        masked_loss: bool = False,
+        optimizer_class: type | None = None,
+        optimizer_params: dict[str, Any] | None = None,
+        lr_scheduler_class: type | None = None,
+        lr_scheduler_params: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__()
-        self.save_hyperparameters(ignore=["net", "loss"])
-        self.net = net
-        self.loss = loss
-        self.optimizer_class = torch.optim.Adam if optimizer_class is None else optimizer_class
+        self.save_hyperparameters(ignore=["network"])
 
-    def forward(self, x: torch.Tensor, n_timesteps: int) -> torch.Tensor:
-        """Forward pass through the model.
-        Args:
-            x: Input tensor with shape (batch, seq_len, channels, height, width)
-            n_timesteps: Number of timesteps to predict
-        Returns:
-            Output tensor with shape (batch, n_timesteps, channels, height, width)
+        self.network = network
+
+        self.criterion = build_loss(
+            loss_class=self.hparams.loss_class,
+            loss_params=self.hparams.loss_params,
+            masked_loss=self.hparams.masked_loss,
+        )
+        self.log_images_iterations = [50, 100, 200, 500, 750, 1000, 2000, 5000]
+
+    def forward(self, x: torch.Tensor, forecast_steps: int, ensemble_size: int | None = None) -> torch.Tensor:
+        """Run the network forward pass.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+        forecast_steps : int
+            Number of steps to forecast.
+        ensemble_size : int or None, optional
+            Number of ensemble members to generate. If ``None``, uses the initialized value. Default is ``None``.
+
+        Returns
+        -------
+        preds : torch.Tensor
+            Forecast tensor.
         """
-        return self.net(x, n_timesteps)  # Assuming net is a callable model
+        ensemble_size = self.hparams.ensemble_size if ensemble_size is None else ensemble_size
+        return self.network(x, steps=forecast_steps, ensemble_size=ensemble_size)
 
-    def model_step(self, batch: Any, batch_idx: int, step_name: str = "train") -> torch.Tensor:
-        """Generic model step for training or validation.
+    def shared_step(
+        self, batch: dict[str, torch.Tensor], split: str = "train", ensemble_size: int | None = None
+    ) -> torch.Tensor:
+        """Shared forward step for training, validation, and testing."""
+        data = batch["data"]
+        past = data[:, : -self.hparams.forecast_steps]
+        future = data[:, -self.hparams.forecast_steps :]
 
-        Args:
-            batch: Input batch of data
-            batch_idx: Index of the current batch
+        preds = self(past, forecast_steps=self.hparams.forecast_steps, ensemble_size=ensemble_size).clamp(min=-1, max=1)
 
-        Returns:
-            Loss value for the current batch
-        """
-        x, y = batch
-        predictions = self.forward(x, n_timesteps=y.shape[1])
-        loss = self.loss(predictions, y)
-        if isinstance(loss, dict):
-            # append step name to loss keys for logging
-            loss = {f"{step_name}/{k}": v.item() for k, v in loss}
-            self.log_dict(loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-            loss = loss.get("loss", loss.get("total_loss", None))
-            if loss is None:
-                raise ValueError(f"Loss is None for step {step_name}. Ensure loss function returns a valid tensor.")
+        if self.hparams.masked_loss:
+            mask = batch["mask"][:, -self.hparams.forecast_steps :]
+            loss = self.criterion(preds, future, mask)
         else:
-            self.log(f"{step_name}/loss", loss.item(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            loss = self.criterion(preds, future)
+
+        if isinstance(loss, tuple):
+            loss, log_dict = loss
+            self.log_dict(
+                log_dict, prog_bar=False, logger=True, on_step=(split == "train"), on_epoch=True, sync_dist=True
+            )
+
+        self.log(f"{split}_loss", loss, prog_bar=True, on_epoch=True, on_step=(split == "train"), sync_dist=True)
+
+        if self.hparams.ensemble_size > 1:
+            ensemble_std = preds.std(dim=2).mean()
+            self.log(f"{split}_ensemble_std", ensemble_std, on_epoch=True, sync_dist=True)
+
+        if split == "train" and (
+            self.global_step in self.log_images_iterations or self.global_step % self.log_images_iterations[-1] == 0
+        ):
+            log_images(
+                past=past,
+                future=future,
+                preds=preds,
+                logger_experiment=self.logger.experiment,
+                global_step=self.global_step,
+                ensemble_size=self.hparams.ensemble_size,
+                split=split,
+            )
         return loss
 
-    def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        """Training step for a single batch.
+    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        return self.shared_step(batch, split="train")
 
-        Args:
-            batch: Input batch of data
-            batch_idx: Index of the current batch
+    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        return self.shared_step(batch, split="val", ensemble_size=10)
 
-        Returns:
-            Loss value for the current batch
+    def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        return self.shared_step(batch, split="test", ensemble_size=10)
+
+    def configure_optimizers(self) -> dict[str, Any]:
+        """Configure the optimizer and optional learning rate scheduler."""
+        if self.hparams.optimizer_class is not None:
+            optimizer = (
+                self.hparams.optimizer_class(self.parameters(), **self.hparams.optimizer_params)
+                if self.hparams.optimizer_params is not None
+                else self.hparams.optimizer_class(self.parameters())
+            )
+        else:
+            optimizer = torch.optim.Adam(self.parameters())
+
+        if self.hparams.lr_scheduler_class is not None:
+            lr_scheduler = (
+                self.hparams.lr_scheduler_class(optimizer, **self.hparams.lr_scheduler_params)
+                if self.hparams.lr_scheduler_params is not None
+                else self.hparams.lr_scheduler_class(optimizer)
+            )
+            return {"optimizer": optimizer, "lr_scheduler": {"scheduler": lr_scheduler, "monitor": "val_loss"}}
+        else:
+            return {"optimizer": optimizer}
+
+    @classmethod
+    def from_checkpoint(cls, checkpoint_path: str, device: str = "cpu") -> "NowcastLightningModule":
+        """Load a model from a checkpoint file."""
+        return cls.load_from_checkpoint(
+            checkpoint_path,
+            map_location=torch.device(device),
+            strict=True,
+            weights_only=False,
+        )
+
+    def predict(self, past: torch.Tensor, forecast_steps: int = 1, ensemble_size: int | None = 1) -> np.ndarray:
+        """Generate precipitation forecasts from past radar observations.
+
+        Input should be raw rain rate values.
+
+        Parameters
+        ----------
+        past : torch.Tensor
+            Past radar frames as rain rate in mm/h, of shape ``(T, H, W)``.
+        forecast_steps : int, optional
+            Number of future timesteps to forecast. Default is ``1``.
+        ensemble_size : int, optional
+            Number of ensemble members. Default is ``1``.
+
+        Returns
+        -------
+        preds : np.ndarray
+            Forecasted rain rate in mm/h, of shape
+            ``(ensemble_size, forecast_steps, H, W)``.
         """
-        return self.model_step(batch, batch_idx, step_name="train")
+        if len(past.shape) != 3:
+            raise ValueError("Input must be of shape (T, H, W)")
 
-    def validation_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        """Validation step for a single batch.
+        T, H, W = past.shape
+        ensemble_size = self.hparams.ensemble_size if ensemble_size is None else ensemble_size
 
-        Args:
-            batch: Input batch of data
-            batch_idx: Index of the current batch
+        divisor = 2 ** getattr(self.network, "num_blocks", 5)
+        padH = (divisor - (H % divisor)) % divisor
+        padW = (divisor - (W % divisor)) % divisor
+        padded_past = past
+        if padH != 0 or padW != 0:
+            padded_past = np.pad(past, ((0, 0), (0, padH), (0, padW)), mode="constant", constant_values=0)
 
-        Returns:
-            Loss value for the current batch
-        """
-        return self.model_step(batch, batch_idx, step_name="val")
+        past_clean = np.nan_to_num(padded_past)
+        past_clean = past_clean[np.newaxis, :, np.newaxis, ...]
+        norm_past = rainrate_to_normalized(past_clean)
+        x = torch.from_numpy(norm_past)
+        x = x.to(self.device)
 
-    def configure_optimizers(self) -> torch.optim.Optimizer:
-        """Configure the optimizer for training.
+        self.eval()
+        with torch.no_grad():
+            preds = self.network(x, steps=forecast_steps, ensemble_size=ensemble_size)
 
-        Returns:
-            Optimizer instance to use for training
-        """
-        return self.optimizer_class(self.parameters(), **(self.hparams.optimizer_kwargs or {}))
+        preds = preds.cpu().numpy()
+        preds = normalized_to_rainrate(preds)
+        preds = preds.squeeze(0)
+        preds = np.swapaxes(preds, 0, 1)
+        preds = preds[..., :H, :W]
+
+        return preds

@@ -16,7 +16,8 @@ from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, Mode
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from .data.zarr_datamodule import RadarDataModule
-from .models.convgru import RadarLightningModel
+from .models.base import NowcastLightningModule
+from .modules.convgru_modules import ConvGruModel
 
 __all__ = [
     "Experiment",
@@ -80,12 +81,16 @@ def training_experiment(
         pin_memory=True,
     )
 
-    pl_module = RadarLightningModel(
+    network = ConvGruModel(
         input_channels=1,
-        forecast_steps=12,
         num_blocks=5,
-        ensemble_size=2,
         noisy_decoder=False,
+    )
+
+    pl_module = NowcastLightningModule(
+        network=network,
+        forecast_steps=12,
+        ensemble_size=2,
         loss_class="crps",
         loss_params={"temporal_lambda": 0.01},
         masked_loss=True,
