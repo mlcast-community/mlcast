@@ -42,8 +42,8 @@
    - [x] Update both datasets' `__init__` to accept `standard_names: list[str]`.
    - [x] Rename internal xarray reference from `self.zg` to standard `self.ds`.
    - [x] Update `__getitem__` to use `self.ds.cf[std_name]` to extract arrays, and `NORMALIZATION_REGISTRY[std_name]` to normalize them, before stacking along the channel dimension.
-- [ ] **New Dataset**:
-   - [ ] Create `SourceDataRandomSamplingDataset` which performs on-the-fly random spatial and temporal slicing.
+- [x] **New Dataset**:
+   - [x] Create `SourceDataRandomSamplingDataset` which performs on-the-fly random spatial and temporal slicing.
 - [ ] **DataModule Implementation Details**:
    - [ ] Inject `dataset_factory` (a `Callable[..., Dataset]`) into `SourceDataDataModule.__init__` so it doesn't hardcode dataset instantiation.
 - [ ] **Tests**: Create `tests/data/test_source_datasets.py` and `tests/data/test_data_module.py`.
