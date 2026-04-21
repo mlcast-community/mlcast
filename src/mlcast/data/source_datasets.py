@@ -15,7 +15,7 @@ from torch.utils.data import Dataset
 from mlcast.data.normalization import rainrate_to_normalized
 
 
-class SampledRadarDataset(Dataset):
+class SourceDataPrecomputedSamplingDataset(Dataset):
     """PyTorch dataset that loads radar datacubes from a Zarr store using
     pre-sampled spatial-temporal coordinates from a CSV file.
 

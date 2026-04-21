@@ -8,10 +8,10 @@ import pandas as pd
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
-from .zarr_dataset import SampledRadarDataset
+from .source_datasets import SourceDataPrecomputedSamplingDataset
 
 
-class RadarDataModule(pl.LightningDataModule):
+class SourceDataDataModule(pl.LightningDataModule):
     """PyTorch Lightning data module for radar datacube datasets.
 
     Handles train/val/test splitting and DataLoader creation from a single
@@ -105,17 +105,17 @@ class RadarDataModule(pl.LightningDataModule):
             time_depth=self.time_depth,
         )
 
-        self.train_dataset = SampledRadarDataset(
+        self.train_dataset = SourceDataPrecomputedSamplingDataset(
             **common_kwargs,
             augment=self.augment,
             indices=range(0, train_end),
         )
-        self.val_dataset = SampledRadarDataset(
+        self.val_dataset = SourceDataPrecomputedSamplingDataset(
             **common_kwargs,
             augment=False,
             indices=range(train_end, val_end),
         )
-        self.test_dataset = SampledRadarDataset(
+        self.test_dataset = SourceDataPrecomputedSamplingDataset(
             **common_kwargs,
             augment=False,
             indices=range(val_end, n),

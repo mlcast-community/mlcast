@@ -15,7 +15,7 @@ import yaml
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from .data.zarr_datamodule import RadarDataModule
+from .data.source_data_module import SourceDataDataModule
 from .models.base import NowcastLightningModule
 from .modules.convgru_modules import ConvGruModel
 
@@ -66,7 +66,7 @@ def training_experiment(
     Experiment
         Configured experiment with model, data, and trainer.
     """
-    data = RadarDataModule(
+    data = SourceDataDataModule(
         zarr_path=zarr_path,
         csv_path=csv_path,
         variable_name=variable_name,

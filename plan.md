@@ -34,21 +34,21 @@
 - [x] Add `jaxtyping` annotations to all `torch.nn.Module` classes to strictly define input/output tensor shapes and dtypes.
 
 ## Phase 3: Decoupling the Data Layer (Generalized Source Data)
-- [ ] **Tests**: Create `tests/data/test_source_datasets.py` and `tests/data/test_data_module.py`.
-   - [ ] Test datasets using the `italian_dataset` fixture to ensure they output `(Time, Channels, Height, Width)` and use `cf_xarray` correctly.
-   - [ ] Test DataModule splits with a mock dataset factory.
 - [ ] **Rename Files & Classes**:
    - [ ] Rename `src/mlcast/data/zarr_datamodule.py` to `source_data_module.py` and `RadarDataModule` to `SourceDataDataModule`.
    - [ ] Rename `src/mlcast/data/zarr_dataset.py` to `source_datasets.py`.
    - [ ] Rename `SampledRadarDataset` to `SourceDataPrecomputedSamplingDataset`.
-- [ ] **New Dataset**:
-   - [ ] Create `SourceDataRandomSamplingDataset` which performs on-the-fly random spatial and temporal slicing.
 - [ ] **Dataset Implementation Details**:
    - [ ] Update both datasets' `__init__` to accept `standard_names: list[str]`.
    - [ ] Rename internal xarray reference from `self.zg` to standard `self.ds`.
    - [ ] Update `__getitem__` to use `self.ds.cf[std_name]` to extract arrays, and `NORMALIZATION_REGISTRY[std_name]` to normalize them, before stacking along the channel dimension.
+- [ ] **New Dataset**:
+   - [ ] Create `SourceDataRandomSamplingDataset` which performs on-the-fly random spatial and temporal slicing.
 - [ ] **DataModule Implementation Details**:
    - [ ] Inject `dataset_factory` (a `Callable[..., Dataset]`) into `SourceDataDataModule.__init__` so it doesn't hardcode dataset instantiation.
+- [ ] **Tests**: Create `tests/data/test_source_datasets.py` and `tests/data/test_data_module.py`.
+   - [ ] Test datasets using the `italian_dataset` fixture to ensure they output `(Time, Channels, Height, Width)` and use `cf_xarray` correctly.
+   - [ ] Test DataModule splits with a mock dataset factory.
 
 ## Phase 4: Enhancing Model Robustness
 - [ ] **Tests**: Create `tests/models/test_convgru.py`.
