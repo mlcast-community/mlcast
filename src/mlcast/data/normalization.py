@@ -1,22 +1,24 @@
 """Unit conversion utilities for radar precipitation data.
 
-Provides functions to convert between rain rate (mm/h), reflectivity (dBZ),
-and a normalized [-1, 1] representation used internally by the models.
+Provides functions to convert between rainfall rate (mm/h), rainfall flux (kg m-2 s-1),
+reflectivity (dBZ), and a normalized [-1, 1] representation used internally by the models.
 """
+
+import warnings
 
 import numpy as np
 
 
-def rainrate_to_reflectivity(rainrate: np.ndarray) -> np.ndarray:
-    """Convert rain rate to reflectivity using the Marshall-Palmer relationship.
+def rainfall_rate_to_reflectivity(rainfall_rate: np.ndarray) -> np.ndarray:
+    """Convert rainfall rate to reflectivity using the Marshall-Palmer relationship.
 
     Applies Z = 200 * R^1.6 and converts to dBZ. Values below ~0.037 mm/h
     are clipped to 0 dBZ; values above 60 dBZ are clipped to 60.
 
     Parameters
     ----------
-    rainrate : np.ndarray
-        Rain rate in mm/h. Can be any shape.
+    rainfall_rate : np.ndarray
+        Rainfall rate in mm/h. Can be any shape.
 
     Returns
     -------
@@ -24,7 +26,32 @@ def rainrate_to_reflectivity(rainrate: np.ndarray) -> np.ndarray:
         Reflectivity in dBZ, clipped to [0, 60]. Same shape as input.
     """
     epsilon = 1e-16
-    return (10 * np.log10(200 * rainrate**1.6 + epsilon)).clip(0, 60)
+    return (10 * np.log10(200 * rainfall_rate**1.6 + epsilon)).clip(0, 60)
+
+
+def rainfall_flux_to_reflectivity(rainfall_flux: np.ndarray) -> np.ndarray:
+    """Convert rainfall flux to reflectivity.
+
+    Wraps :func:`rainfall_rate_to_reflectivity` and emits a warning that it
+    assumes the same scaling applies.
+
+    Parameters
+    ----------
+    rainfall_flux : np.ndarray
+        Rainfall flux in kg m-2 s-1. Can be any shape.
+
+    Returns
+    -------
+    reflectivity : np.ndarray
+        Reflectivity in dBZ, clipped to [0, 60]. Same shape as input.
+    """
+    warnings.warn(
+        "Assuming we can use the same function (rainfall_rate_to_reflectivity) "
+        "for scaling rainfall_flux to reflectivity.",
+        UserWarning,
+        stacklevel=2,
+    )
+    return rainfall_rate_to_reflectivity(rainfall_flux)
 
 
 def normalize_reflectivity(reflectivity: np.ndarray) -> np.ndarray:
@@ -59,8 +86,8 @@ def denormalize_reflectivity(normalized: np.ndarray) -> np.ndarray:
     return (normalized + 1.0) * 30.0
 
 
-def reflectivity_to_rainrate(reflectivity: np.ndarray) -> np.ndarray:
-    """Convert reflectivity back to rain rate using the inverse Marshall-Palmer relationship.
+def reflectivity_to_rainfall_rate(reflectivity: np.ndarray) -> np.ndarray:
+    """Convert reflectivity back to rainfall rate using the inverse Marshall-Palmer relationship.
 
     Applies R = (Z_linear / 200)^(1/1.6) where Z_linear = 10^(dBZ/10).
 
@@ -71,38 +98,83 @@ def reflectivity_to_rainrate(reflectivity: np.ndarray) -> np.ndarray:
 
     Returns
     -------
-    rainrate : np.ndarray
-        Rain rate in mm/h. Same shape as input.
+    rainfall_rate : np.ndarray
+        Rainfall rate in mm/h. Same shape as input.
     """
     z_linear = 10 ** (reflectivity / 10.0)
     return (z_linear / 200.0) ** (1.0 / 1.6)
 
 
-def rainrate_to_normalized(rainrate: np.ndarray) -> np.ndarray:
-    """Convert rain rate directly to normalized reflectivity.
+def reflectivity_to_rainfall_flux(reflectivity: np.ndarray) -> np.ndarray:
+    """Convert reflectivity back to rainfall flux.
 
-    Composes :func:`rainrate_to_reflectivity` and
+    Wraps :func:`reflectivity_to_rainfall_rate` and emits a warning that it
+    assumes the same scaling applies.
+
+    Parameters
+    ----------
+    reflectivity : np.ndarray
+        Reflectivity in dBZ. Can be any shape.
+
+    Returns
+    -------
+    rainfall_flux : np.ndarray
+        Rainfall flux in kg m-2 s-1. Same shape as input.
+    """
+    warnings.warn(
+        "Assuming we can use the same function (reflectivity_to_rainfall_rate) "
+        "for scaling reflectivity to rainfall_flux.",
+        UserWarning,
+        stacklevel=2,
+    )
+    return reflectivity_to_rainfall_rate(reflectivity)
+
+
+def rainfall_rate_to_normalized(rainfall_rate: np.ndarray) -> np.ndarray:
+    """Convert rainfall rate directly to normalized reflectivity.
+
+    Composes :func:`rainfall_rate_to_reflectivity` and
     :func:`normalize_reflectivity`.
 
     Parameters
     ----------
-    rainrate : np.ndarray
-        Rain rate in mm/h. Can be any shape.
+    rainfall_rate : np.ndarray
+        Rainfall rate in mm/h. Can be any shape.
 
     Returns
     -------
     normalized : np.ndarray
         Normalized reflectivity in [-1, 1]. Same shape as input.
     """
-    reflectivity = rainrate_to_reflectivity(rainrate)
+    reflectivity = rainfall_rate_to_reflectivity(rainfall_rate)
     return normalize_reflectivity(reflectivity)
 
 
-def normalized_to_rainrate(normalized: np.ndarray) -> np.ndarray:
-    """Convert normalized reflectivity back to rain rate.
+def rainfall_flux_to_normalized(rainfall_flux: np.ndarray) -> np.ndarray:
+    """Convert rainfall flux directly to normalized reflectivity.
+
+    Composes :func:`rainfall_flux_to_reflectivity` and
+    :func:`normalize_reflectivity`.
+
+    Parameters
+    ----------
+    rainfall_flux : np.ndarray
+        Rainfall flux in kg m-2 s-1. Can be any shape.
+
+    Returns
+    -------
+    normalized : np.ndarray
+        Normalized reflectivity in [-1, 1]. Same shape as input.
+    """
+    reflectivity = rainfall_flux_to_reflectivity(rainfall_flux)
+    return normalize_reflectivity(reflectivity)
+
+
+def normalized_to_rainfall_rate(normalized: np.ndarray) -> np.ndarray:
+    """Convert normalized reflectivity back to rainfall rate.
 
     Composes :func:`denormalize_reflectivity` and
-    :func:`reflectivity_to_rainrate`.
+    :func:`reflectivity_to_rainfall_rate`.
 
     Parameters
     ----------
@@ -111,13 +183,39 @@ def normalized_to_rainrate(normalized: np.ndarray) -> np.ndarray:
 
     Returns
     -------
-    rainrate : np.ndarray
-        Rain rate in mm/h. Same shape as input.
+    rainfall_rate : np.ndarray
+        Rainfall rate in mm/h. Same shape as input.
     """
     reflectivity = denormalize_reflectivity(normalized)
-    return reflectivity_to_rainrate(reflectivity)
+    return reflectivity_to_rainfall_rate(reflectivity)
+
+
+def normalized_to_rainfall_flux(normalized: np.ndarray) -> np.ndarray:
+    """Convert normalized reflectivity back to rainfall flux.
+
+    Composes :func:`denormalize_reflectivity` and
+    :func:`reflectivity_to_rainfall_flux`.
+
+    Parameters
+    ----------
+    normalized : np.ndarray
+        Normalized reflectivity in [-1, 1]. Can be any shape.
+
+    Returns
+    -------
+    rainfall_flux : np.ndarray
+        Rainfall flux in kg m-2 s-1. Same shape as input.
+    """
+    reflectivity = denormalize_reflectivity(normalized)
+    return reflectivity_to_rainfall_flux(reflectivity)
 
 
 NORMALIZATION_REGISTRY = {
-    "rainfall_rate": rainrate_to_normalized,
+    "rainfall_rate": rainfall_rate_to_normalized,
+    "rainfall_flux": rainfall_flux_to_normalized,
+}
+
+DENORMALIZATION_REGISTRY = {
+    "rainfall_rate": normalized_to_rainfall_rate,
+    "rainfall_flux": normalized_to_rainfall_flux,
 }

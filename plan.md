@@ -46,9 +46,9 @@
    - [x] Create `SourceDataRandomSamplingDataset` which performs on-the-fly random spatial and temporal slicing.
 - [x] **DataModule Implementation Details**:
    - [x] Inject `dataset_factory` (a `Callable[..., Dataset]`) into `SourceDataDataModule.__init__` so it doesn't hardcode dataset instantiation.
-- [ ] **Tests**: Create `tests/data/test_source_datasets.py` and `tests/data/test_data_module.py`.
-   - [ ] Test datasets using the `italian_dataset` fixture to ensure they output `(Time, Channels, Height, Width)` and use `cf_xarray` correctly.
-   - [ ] Test DataModule splits with a mock dataset factory.
+- [x] **Tests**: Create `tests/data/test_source_datasets.py` and `tests/data/test_data_module.py`.
+   - [x] Test datasets using the `italian_dataset` fixture to ensure they output `(Time, Channels, Height, Width)` and use `cf_xarray` correctly.
+   - [x] Test DataModule splits with a mock dataset factory.
 
 ## Phase 4: Enhancing Model Robustness
 - [ ] **Tests**: Create `tests/models/test_convgru.py`.

@@ -13,7 +13,7 @@ import torch
 from beartype import beartype
 from jaxtyping import Float, jaxtyped
 
-from mlcast.data.normalization import normalized_to_rainrate, rainrate_to_normalized
+from mlcast.data.normalization import DENORMALIZATION_REGISTRY, NORMALIZATION_REGISTRY
 from mlcast.losses import build_loss
 from mlcast.visualization import log_images
 
@@ -273,25 +273,32 @@ class NowcastLightningModule(pl.LightningModule):
         )
 
     def predict(
-        self, past: torch.Tensor, forecast_steps: int = 1, ensemble_size: int | None = 1
+        self,
+        past: torch.Tensor,
+        forecast_steps: int = 1,
+        ensemble_size: int | None = 1,
+        standard_name: str = "rainfall_rate",
     ) -> np.ndarray[Any, Any]:
         """Generate precipitation forecasts from past radar observations.
 
-        Input should be raw rain rate values.
+        Input should be raw unnormalized values.
 
         Parameters
         ----------
         past : torch.Tensor
-            Past radar frames as rain rate in mm/h, of shape ``(T, H, W)``.
+            Past radar frames as unnormalized values (e.g., mm/h or kg m-2 s-1), of shape ``(T, H, W)``.
         forecast_steps : int, optional
             Number of future timesteps to forecast. Default is ``1``.
         ensemble_size : int, optional
             Number of ensemble members. Default is ``1``.
+        standard_name : str, optional
+            The CF standard name defining the input/output domain for normalization lookup.
+            Default is ``"rainfall_rate"``.
 
         Returns
         -------
         preds : np.ndarray
-            Forecasted rain rate in mm/h, of shape
+            Forecasted unnormalized values, of shape
             ``(ensemble_size, forecast_steps, H, W)``.
         """
         if len(past.shape) != 3:
@@ -309,7 +316,10 @@ class NowcastLightningModule(pl.LightningModule):
 
         past_clean = np.nan_to_num(padded_past)
         past_clean = past_clean[np.newaxis, :, np.newaxis, ...]
-        norm_past = rainrate_to_normalized(past_clean)
+
+        norm_func = NORMALIZATION_REGISTRY[standard_name]
+        norm_past = norm_func(past_clean)
+
         x = torch.from_numpy(norm_past)
         x = x.to(self.device)
 
@@ -318,7 +328,10 @@ class NowcastLightningModule(pl.LightningModule):
             preds_tensor = self.network(x, steps=forecast_steps, ensemble_size=ensemble_size)
 
         preds_np: np.ndarray[Any, Any] = preds_tensor.cpu().numpy()
-        preds_np = normalized_to_rainrate(preds_np)
+
+        denorm_func = DENORMALIZATION_REGISTRY[standard_name]
+        preds_np = denorm_func(preds_np)
+
         preds_np = preds_np.squeeze(0)
         preds_np = np.swapaxes(preds_np, 0, 1)
         preds_np = preds_np[..., :H, :W]
