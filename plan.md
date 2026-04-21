@@ -11,10 +11,10 @@
 - [x] **Rename & Move**: Move `src/mlcast/utils.py` to `src/mlcast/data/normalization.py`. Update all imports.
 - [x] **Normalization Registry**: Create a `NORMALIZATION_REGISTRY` dict in `normalization.py` mapping CF standard names (e.g., `"rainfall_rate"`) to their respective normalization functions.
 - [x] **Visualization**: Extract `apply_radar_colormap` and `log_images` out of the model file into a new `src/mlcast/visualization.py`.
-- [ ] **Losses (`src/mlcast/losses.py`)**:
-   - [ ] Rename `afCRPS` to `AFCRPS`.
-   - [ ] Update `build_loss` signature to explicitly default to `loss_class="mse"`.
-   - [ ] Expand docstrings to include explicit expected tensor shapes.
+- [x] **Losses (`src/mlcast/losses.py`)**:
+   - [x] Rename `afCRPS` to `AFCRPS`.
+   - [x] Update `build_loss` signature to explicitly default to `loss_class="mse"`.
+   - [x] Expand docstrings to include explicit expected tensor shapes.
 - [ ] **CLI & Docs (`__main__.py` & `README.md`)**:
    - [ ] Refactor `__main__.py` to use `argparse` subparsers instead of manual argv checking. Make `train` automatically default to `training_experiment` if no base config is provided.
    - [ ] Add "Design" section to `README.md` with Mermaid class diagram (Separation of Concerns, Generalized Data Layer, Fiddle Orchestrator).

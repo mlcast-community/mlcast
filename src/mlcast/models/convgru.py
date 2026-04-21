@@ -36,8 +36,8 @@ class RadarLightningModel(pl.LightningModule):
         Whether to use random noise as decoder input. Default is ``False``.
     forecast_steps : int or None, optional
         Number of future timesteps to forecast. Default is ``None``.
-    loss_class : type, str, or None, optional
-        Loss function class or its string name. Default is ``None`` (MSELoss).
+    loss_class : type[torch.nn.Module] or str, optional
+        Loss function class or its string name. Default is ``"mse"``.
     loss_params : dict or None, optional
         Keyword arguments for the loss constructor. Default is ``None``.
     masked_loss : bool, optional
@@ -59,7 +59,7 @@ class RadarLightningModel(pl.LightningModule):
         ensemble_size: int = 1,
         noisy_decoder: bool = False,
         forecast_steps: type | int | None = None,
-        loss_class: type | str | None = None,
+        loss_class: type[torch.nn.Module] | str = "mse",
         loss_params: dict[str, Any] | None = None,
         masked_loss: bool = False,
         optimizer_class: type | None = None,

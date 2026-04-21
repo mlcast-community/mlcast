@@ -1,10 +1,25 @@
 import pytest
 import torch
 
-from mlcast.losses import CRPS, afCRPS
+from mlcast.losses import AFCRPS, CRPS, build_loss
 
 
-@pytest.mark.parametrize("loss_class", [CRPS, afCRPS])
+def test_build_loss_invalid_type():
+    """Verify build_loss raises TypeError if loss_class is neither a string nor a class."""
+    with pytest.raises(TypeError, match="loss_class must be a string or a class"):
+        build_loss(loss_class=123)
+
+    with pytest.raises(TypeError, match="loss_class must be a string or a class"):
+        build_loss(loss_class=None)
+
+
+def test_build_loss_invalid_string():
+    """Verify build_loss raises ValueError for unknown string names."""
+    with pytest.raises(ValueError, match="Unknown loss class 'unknown'"):
+        build_loss(loss_class="unknown")
+
+
+@pytest.mark.parametrize("loss_class", [CRPS, AFCRPS])
 def test_crps_loss_shapes(loss_class):
     """Verify that CRPS and afCRPS losses output scalar for mean reduction,
     and correct shapes for other reductions."""
