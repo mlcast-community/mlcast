@@ -51,11 +51,11 @@
    - [x] Test DataModule splits with a mock dataset factory.
 
 ## Phase 4: Enhancing Model Robustness
-- [ ] **Tests**: Create `tests/models/test_convgru.py`.
-   - [ ] Pass dummy tensors of "awkward" non-power-of-2 sizes (e.g., `250x250`) and assert the dynamic padding handles it gracefully without crashing.
-- [ ] **Architecture (`ConvGruModel`)**:
-   - [ ] Move the dynamic padding logic currently in `predict()` into the `forward()` pass using `torch.nn.functional.pad`.
-   - [ ] Ensure it mathematically pads to `2 ** num_blocks` before the encoder, and crops it back before returning.
+- [x] **Tests**: Create `tests/models/test_convgru.py`.
+   - [x] Pass dummy tensors of "awkward" non-power-of-2 sizes (e.g., `250x250`) and assert the dynamic padding handles it gracefully without crashing.
+- [x] **Architecture (`ConvGruModel`)**:
+   - [x] Move the dynamic padding logic currently in `predict()` into the `forward()` pass using `torch.nn.functional.pad`.
+   - [x] Ensure it mathematically pads to `2 ** num_blocks` before the encoder, and crops it back before returning.
 
 ## Phase 5: The Fiddle Config & Validation (The Orchestrator)
 - [ ] **Tests**: Create `tests/test_configs.py`.
