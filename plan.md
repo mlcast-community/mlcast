@@ -15,14 +15,13 @@
    - [x] Rename `afCRPS` to `AFCRPS`.
    - [x] Update `build_loss` signature to explicitly default to `loss_class="mse"`.
    - [x] Expand docstrings to include explicit expected tensor shapes.
-- [ ] **CLI & Docs (`__main__.py` & `README.md`)**:
-   - [ ] Refactor `__main__.py` to use `argparse` subparsers instead of manual argv checking. Make `train` automatically default to `training_experiment` if no base config is provided.
-   - [ ] Add "Design" section to `README.md` with Mermaid class diagram (Separation of Concerns, Generalized Data Layer, Fiddle Orchestrator).
-   - [ ] Add "Usage" section to `README.md` detailing default training, simple Fiddle overrides, semantic mutators (Fiddlers), and explicit examples for changing source dataset, variables, and dataset class. Highlight the serialized `config.yaml` saved in `logs/mlcast/`.
-- [ ] **Config YAML (`src/mlcast/configs.py`)**:
-   - [ ] Rename `convgru_experiment` to `training_experiment`.
-   - [ ] Change the default `TensorBoardLogger` name from `"convgru"` to `"mlcast"`.
-   - [ ] Retain `config_to_dict` since Fiddle lacks a native recursive YAML serializer.
+- [x] **CLI (`__main__.py`)**:
+   - [x] Refactor `__main__.py` to use `argparse` subparsers instead of manual argv checking. Make `train` automatically default to `training_experiment` if no base config is provided.
+
+- [x] **Config YAML (`src/mlcast/configs.py`)**:
+   - [x] Rename `convgru_experiment` to `training_experiment`.
+   - [x] Change the default `TensorBoardLogger` name from `"convgru"` to `"mlcast"`.
+   - [x] Retain `config_to_dict` since Fiddle lacks a native recursive YAML serializer.
 
 ## Phase 2: Decoupling the Architecture (PR Feedback)
 - [ ] **Generic Lightning Wrapper (`src/mlcast/models/base.py` or similar)**:
@@ -72,3 +71,8 @@
 - [ ] **`src/mlcast/configs.py` (Fiddlers)**:
    - [ ] Create `set_variables(cfg, standard_names: list[str])` to sync the dataset and the network's `input_channels`.
    - [ ] Create `toggle_masking(cfg, enabled: bool)` to sync `cfg.data.dataset_factory.return_mask` with `cfg.pl_module.masked_loss`.
+
+## Phase 7: Documentation
+- [ ] **Docs (`README.md`)**:
+   - [ ] Add "Design" section to `README.md` with Mermaid class diagram (Separation of Concerns, Generalized Data Layer, Fiddle Orchestrator).
+   - [ ] Add "Usage" section to `README.md` detailing default training, simple Fiddle overrides, semantic mutators (Fiddlers), and explicit examples for changing source dataset, variables, and dataset class. Highlight the serialized `config.yaml` saved in `logs/mlcast/`.

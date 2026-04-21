@@ -20,7 +20,7 @@ from .models.convgru import RadarLightningModel
 
 __all__ = [
     "Experiment",
-    "convgru_experiment",
+    "training_experiment",
 ]
 
 
@@ -39,7 +39,7 @@ class Experiment:
 
 
 @fiddle.experimental.auto_config.auto_config
-def convgru_experiment(
+def training_experiment(
     *,
     zarr_path: str = "./data/radar.zarr",
     csv_path: str = "./data/sampled_datacubes.csv",
@@ -104,7 +104,7 @@ def convgru_experiment(
             EarlyStopping(monitor="val_loss", patience=100, mode="min"),
             LearningRateMonitor(logging_interval="step"),
         ],
-        logger=TensorBoardLogger(save_dir="logs", name="convgru"),
+        logger=TensorBoardLogger(save_dir="logs", name="mlcast"),
     )
 
     return Experiment(
@@ -144,7 +144,7 @@ def train_from_config(cfg: fdl.Config) -> None:
     Parameters
     ----------
     cfg : fdl.Config
-        Fiddle configuration as returned by :func:`convgru_experiment`.
+        Fiddle configuration as returned by :func:`training_experiment`.
     """
     experiment = fdl.build(cfg)
 

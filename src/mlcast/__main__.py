@@ -7,13 +7,11 @@ Usage examples::
 
     # Train with default config:
     python -m mlcast train \\
-        --config config:convgru_experiment \\
         --config set:data.zarr_path=/path/to/data.zarr \\
         --config set:data.csv_path=/path/to/sampled.csv
 
     # Override training parameters:
     python -m mlcast train \\
-        --config config:convgru_experiment \\
         --config set:data.zarr_path=/path/to/data.zarr \\
         --config set:data.csv_path=/path/to/sampled.csv \\
         --config set:data.batch_size=32 \\
@@ -21,6 +19,7 @@ Usage examples::
         --config set:trainer.max_epochs=50
 """
 
+import argparse
 import sys
 
 from absl import app
@@ -31,38 +30,43 @@ from . import configs  # noqa: F401 — module must be importable for absl_flags
 _CONFIG = absl_flags.DEFINE_fiddle_config(
     "config",
     default_module=sys.modules[f"{__package__}.configs"],
-    help_string="Experiment configuration. Use --config config:convgru_experiment to load defaults.",
+    help_string="Experiment configuration. Default is training_experiment.",
 )
 
-COMMANDS = ["train"]
 
+def train_main(argv: list[str]) -> None:
+    """Build and run the training experiment from the Fiddle configuration."""
+    from .configs import train_from_config
 
-def main(argv: list[str]) -> None:
-    """Dispatch to the requested subcommand."""
-    # argv[0] is the program name, argv[1:] are remaining positional args
-    remaining = argv[1:]
-
-    if not remaining:
-        print(f"Usage: mlcast <command> [flags]\n\nAvailable commands: {', '.join(COMMANDS)}")
+    if _CONFIG.value is None:
+        print("Error: --config flag is required.", file=sys.stderr)
         sys.exit(1)
-
-    command = remaining[0]
-
-    if command == "train":
-        from .configs import train_from_config
-
-        if _CONFIG.value is None:
-            print("Error: --config flag is required. Example: --config config:convgru_experiment")
-            sys.exit(1)
-        train_from_config(_CONFIG.value)
-    else:
-        print(f"Unknown command: {command}\nAvailable commands: {', '.join(COMMANDS)}")
-        sys.exit(1)
+    train_from_config(_CONFIG.value)
 
 
 def cli() -> None:
     """Console script entry point for ``mlcast`` command."""
-    app.run(main)
+    parser = argparse.ArgumentParser(prog="mlcast")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    subparsers.add_parser("train", help="Train a model.")
+
+    args, remaining = parser.parse_known_args()
+
+    if args.command == "train":
+        has_base_config = False
+        for i, arg in enumerate(remaining):
+            if arg.startswith("--config=config:"):
+                has_base_config = True
+                break
+            if arg == "--config" and i + 1 < len(remaining) and remaining[i + 1].startswith("config:"):
+                has_base_config = True
+                break
+
+        if not has_base_config:
+            remaining = ["--config=config:training_experiment"] + remaining
+
+        app.run(train_main, argv=[sys.argv[0]] + remaining)
 
 
 if __name__ == "__main__":
