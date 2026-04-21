@@ -261,7 +261,7 @@ class DecoderBlock(nn.Module):
     def forward(
         self,
         x: Float[torch.Tensor, "batch time in_channels height width"],
-        hidden_state: Float[torch.Tensor, "batch time in_channels height width"],
+        hidden_state: Float[torch.Tensor, "batch in_channels height width"],
     ) -> Float[torch.Tensor, "batch time out_channels out_height out_width"]:
         """Forward the decoder block.
 
@@ -269,7 +269,7 @@ class DecoderBlock(nn.Module):
         ----------
         x : Float[torch.Tensor, "batch time in_channels height width"]
             Input sequence.
-        hidden_state : Float[torch.Tensor, "batch time in_channels height width"]
+        hidden_state : Float[torch.Tensor, "batch in_channels height width"]
             Hidden state from the corresponding encoder block.
 
         Returns
@@ -309,7 +309,7 @@ class Decoder(nn.Module):
     def forward(
         self,
         x: Float[torch.Tensor, "batch time hidden_channels height width"],
-        hidden_states: list[Float[torch.Tensor, "batch time _ _ _"]],
+        hidden_states: list[Float[torch.Tensor, "batch _ _ _"]],
     ) -> Float[torch.Tensor, "batch time out_channels out_height out_width"]:
         """Forward the decoder through all blocks.
 
@@ -317,7 +317,7 @@ class Decoder(nn.Module):
         ----------
         x : Float[torch.Tensor, "batch time hidden_channels height width"]
             Initial decoder input (usually zeros or noise).
-        hidden_states : list of Float[torch.Tensor, "batch time _ _ _"]
+        hidden_states : list of Float[torch.Tensor, "batch _ _ _"]
             Hidden states from the encoder (in reverse order), one per block.
 
         Returns
@@ -361,7 +361,7 @@ class ConvGruModel(nn.Module):
     @jaxtyped(typechecker=beartype)
     def forward(
         self, x: Float[torch.Tensor, "batch time channels height width"], steps: int, ensemble_size: int = 1
-    ) -> Float[torch.Tensor, "batch steps out_channels height width"]:
+    ) -> Float[torch.Tensor, "batch steps _ height width"]:
         """Forward the encoder-decoder model.
 
         Parameters
@@ -379,6 +379,14 @@ class ConvGruModel(nn.Module):
         preds : Float[torch.Tensor, "batch steps out_channels height width"]
             Forecast tensor.
         """
+        _, _, _, H, W = x.shape
+        divisor = 2**self.num_blocks
+        pad_h = (divisor - (H % divisor)) % divisor
+        pad_w = (divisor - (W % divisor)) % divisor
+
+        if pad_h > 0 or pad_w > 0:
+            x = torch.nn.functional.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0)
+
         encoded = self.encoder(x)
 
         x_dec_shape = list(encoded[-1].shape)
@@ -392,9 +400,13 @@ class ConvGruModel(nn.Module):
                 x_dec = torch.randn(x_dec_shape, dtype=encoded[-1].dtype, device=encoded[-1].device)
                 decoded = self.decoder(x_dec, last_hidden_per_block)
                 preds.append(decoded)
-            return torch.cat(preds, dim=2)
+            out = torch.cat(preds, dim=2)
         else:
             x_dec_func = torch.randn if self.noisy_decoder else torch.zeros
             x_dec = x_dec_func(x_dec_shape, dtype=encoded[-1].dtype, device=encoded[-1].device)
-            decoded = self.decoder(x_dec, last_hidden_per_block)
-            return decoded
+            out = self.decoder(x_dec, last_hidden_per_block)
+
+        if pad_h > 0 or pad_w > 0:
+            out = out[..., :H, :W]
+
+        return out

@@ -307,14 +307,7 @@ class NowcastLightningModule(pl.LightningModule):
         T, H, W = past.shape
         ensemble_size = self.hparams["ensemble_size"] if ensemble_size is None else ensemble_size
 
-        divisor = 2 ** getattr(self.network, "num_blocks", 5)
-        padH = (divisor - (H % divisor)) % divisor
-        padW = (divisor - (W % divisor)) % divisor
-        padded_past: np.ndarray[Any, Any] = past.cpu().numpy()
-        if padH != 0 or padW != 0:
-            padded_past = np.pad(padded_past, ((0, 0), (0, padH), (0, padW)), mode="constant", constant_values=0)
-
-        past_clean = np.nan_to_num(padded_past)
+        past_clean = np.nan_to_num(past.cpu().numpy())
         past_clean = past_clean[np.newaxis, :, np.newaxis, ...]
 
         norm_func = NORMALIZATION_REGISTRY[standard_name]
@@ -334,6 +327,5 @@ class NowcastLightningModule(pl.LightningModule):
 
         preds_np = preds_np.squeeze(0)
         preds_np = np.swapaxes(preds_np, 0, 1)
-        preds_np = preds_np[..., :H, :W]
 
         return preds_np
