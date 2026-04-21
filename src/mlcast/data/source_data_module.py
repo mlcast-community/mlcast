@@ -1,4 +1,4 @@
-"""PyTorch Lightning data module for radar datacube datasets.
+"""PyTorch Lightning data module for spatio-temporal datasets.
 
 Handles train/val/test splitting and DataLoader creation from a single
 Zarr store and CSV coordinate file produced by mlcast-dataset-sampler.
@@ -12,7 +12,7 @@ from .source_datasets import SourceDataPrecomputedSamplingDataset
 
 
 class SourceDataDataModule(pl.LightningDataModule):
-    """PyTorch Lightning data module for radar datacube datasets.
+    """PyTorch Lightning data module for spatio-temporal datasets.
 
     Handles train/val/test splitting and DataLoader creation from a single
     Zarr store and CSV coordinate file.
@@ -22,9 +22,9 @@ class SourceDataDataModule(pl.LightningDataModule):
     zarr_path : str
         Path to the Zarr dataset.
     csv_path : str
-        Path to the CSV file with datacube coordinates.
-    variable_name : str
-        Name of the variable to load from the Zarr store.
+        Path to the CSV file with crop coordinates.
+    standard_names : list of str
+        Names of the standard CF variables to load from the Zarr store.
     steps : int
         Number of timesteps per sample.
     train_ratio : float, optional
@@ -39,9 +39,9 @@ class SourceDataDataModule(pl.LightningDataModule):
         Whether to apply data augmentation (training set only). Default is
         ``True``.
     width : int, optional
-        Spatial width of each datacube. Default is ``256``.
+        Spatial width of each crop. Default is ``256``.
     height : int, optional
-        Spatial height of each datacube. Default is ``256``.
+        Spatial height of each crop. Default is ``256``.
     time_depth : int, optional
         Number of timesteps in the sampled window. Default is ``24``.
     **dataloader_kwargs
@@ -53,7 +53,7 @@ class SourceDataDataModule(pl.LightningDataModule):
         self,
         zarr_path,
         csv_path,
-        variable_name,
+        standard_names,
         steps,
         train_ratio=0.7,
         val_ratio=0.15,
@@ -68,7 +68,7 @@ class SourceDataDataModule(pl.LightningDataModule):
         super().__init__()
         self.zarr_path = zarr_path
         self.csv_path = csv_path
-        self.variable_name = variable_name
+        self.standard_names = standard_names
         self.steps = steps
         self.train_ratio = train_ratio
         self.val_ratio = val_ratio
@@ -96,7 +96,7 @@ class SourceDataDataModule(pl.LightningDataModule):
         common_kwargs = dict(
             zarr_path=self.zarr_path,
             csv_path=self.csv_path,
-            variable_name=self.variable_name,
+            standard_names=self.standard_names,
             steps=self.steps,
             return_mask=self.return_mask,
             deterministic=self.deterministic,
@@ -108,17 +108,17 @@ class SourceDataDataModule(pl.LightningDataModule):
         self.train_dataset = SourceDataPrecomputedSamplingDataset(
             **common_kwargs,
             augment=self.augment,
-            indices=range(0, train_end),
+            time_slice=slice(0, train_end),
         )
         self.val_dataset = SourceDataPrecomputedSamplingDataset(
             **common_kwargs,
             augment=False,
-            indices=range(train_end, val_end),
+            time_slice=slice(train_end, val_end),
         )
         self.test_dataset = SourceDataPrecomputedSamplingDataset(
             **common_kwargs,
             augment=False,
-            indices=range(val_end, n),
+            time_slice=slice(val_end, n),
         )
 
     def train_dataloader(self):

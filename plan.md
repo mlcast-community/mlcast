@@ -34,14 +34,14 @@
 - [x] Add `jaxtyping` annotations to all `torch.nn.Module` classes to strictly define input/output tensor shapes and dtypes.
 
 ## Phase 3: Decoupling the Data Layer (Generalized Source Data)
-- [ ] **Rename Files & Classes**:
-   - [ ] Rename `src/mlcast/data/zarr_datamodule.py` to `source_data_module.py` and `RadarDataModule` to `SourceDataDataModule`.
-   - [ ] Rename `src/mlcast/data/zarr_dataset.py` to `source_datasets.py`.
-   - [ ] Rename `SampledRadarDataset` to `SourceDataPrecomputedSamplingDataset`.
-- [ ] **Dataset Implementation Details**:
-   - [ ] Update both datasets' `__init__` to accept `standard_names: list[str]`.
-   - [ ] Rename internal xarray reference from `self.zg` to standard `self.ds`.
-   - [ ] Update `__getitem__` to use `self.ds.cf[std_name]` to extract arrays, and `NORMALIZATION_REGISTRY[std_name]` to normalize them, before stacking along the channel dimension.
+- [x] **Rename Files & Classes**:
+   - [x] Rename `src/mlcast/data/zarr_datamodule.py` to `source_data_module.py` and `RadarDataModule` to `SourceDataDataModule`.
+   - [x] Rename `src/mlcast/data/zarr_dataset.py` to `source_datasets.py`.
+   - [x] Rename `SampledRadarDataset` to `SourceDataPrecomputedSamplingDataset`.
+- [x] **Dataset Implementation Details**:
+   - [x] Update both datasets' `__init__` to accept `standard_names: list[str]`.
+   - [x] Rename internal xarray reference from `self.zg` to standard `self.ds`.
+   - [x] Update `__getitem__` to use `self.ds.cf[std_name]` to extract arrays, and `NORMALIZATION_REGISTRY[std_name]` to normalize them, before stacking along the channel dimension.
 - [ ] **New Dataset**:
    - [ ] Create `SourceDataRandomSamplingDataset` which performs on-the-fly random spatial and temporal slicing.
 - [ ] **DataModule Implementation Details**:

@@ -44,7 +44,7 @@ def training_experiment(
     *,
     zarr_path: str = "./data/radar.zarr",
     csv_path: str = "./data/sampled_datacubes.csv",
-    variable_name: str = "RR",
+    standard_names: list[str] | None = None,
 ) -> Experiment:
     """Build a Fiddle config for ConvGRU ensemble radar nowcasting.
 
@@ -58,8 +58,8 @@ def training_experiment(
         Path to the Zarr dataset.
     csv_path : str
         Path to the sampled datacubes CSV.
-    variable_name : str
-        Name of the rain rate variable in the Zarr store.
+    standard_names : list of str, optional
+        Names of the CF standard variables in the Zarr store.
 
     Returns
     -------
@@ -69,7 +69,7 @@ def training_experiment(
     data = SourceDataDataModule(
         zarr_path=zarr_path,
         csv_path=csv_path,
-        variable_name=variable_name,
+        standard_names=standard_names or ["rainfall_rate"],
         steps=18,
         train_ratio=0.70,
         val_ratio=0.15,
