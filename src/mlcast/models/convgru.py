@@ -12,9 +12,9 @@ import pytorch_lightning as pl
 import torch
 import torchvision
 
+from mlcast.data.normalization import normalized_to_rainrate, rainrate_to_normalized
 from mlcast.losses import build_loss
 from mlcast.modules.convgru_modules import EncoderDecoder
-from mlcast.utils import normalized_to_rainrate, rainrate_to_normalized
 
 
 def apply_radar_colormap(tensor: torch.Tensor) -> torch.Tensor:

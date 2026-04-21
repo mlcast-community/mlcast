@@ -1,6 +1,6 @@
 import numpy as np
 
-from mlcast.utils import (
+from mlcast.data.normalization import (
     normalized_to_rainrate,
     rainrate_to_normalized,
 )

@@ -12,7 +12,7 @@ import torch
 import xarray as xr
 from torch.utils.data import Dataset
 
-from mlcast.utils import rainrate_to_normalized
+from mlcast.data.normalization import rainrate_to_normalized
 
 
 class SampledRadarDataset(Dataset):
