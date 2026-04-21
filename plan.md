@@ -10,7 +10,7 @@
    - [x] Verify `AFCRPS` and `CRPS` loss shapes.
 - [x] **Rename & Move**: Move `src/mlcast/utils.py` to `src/mlcast/data/normalization.py`. Update all imports.
 - [x] **Normalization Registry**: Create a `NORMALIZATION_REGISTRY` dict in `normalization.py` mapping CF standard names (e.g., `"rainfall_rate"`) to their respective normalization functions.
-- [ ] **Visualization**: Extract `apply_radar_colormap` and `log_images` out of the model file into a new `src/mlcast/visualization.py`.
+- [x] **Visualization**: Extract `apply_radar_colormap` and `log_images` out of the model file into a new `src/mlcast/visualization.py`.
 - [ ] **Losses (`src/mlcast/losses.py`)**:
    - [ ] Rename `afCRPS` to `AFCRPS`.
    - [ ] Update `build_loss` signature to explicitly default to `loss_class="mse"`.
