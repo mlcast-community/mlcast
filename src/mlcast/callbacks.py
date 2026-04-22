@@ -16,15 +16,25 @@ from pytorch_lightning.loggers import MLFlowLogger
 _NVML_UNSUPPORTED_GPU_PREFIXES = ("GB10", "Orin", "Xavier", "TX2", "Nano")
 
 
-def _suppress_gpu_monitor_warnings_if_needed() -> None:
-    """Suppress MLflow GPU monitor warnings for embedded NVIDIA GPUs.
+class _SuppressGpuWarningsFilter(logging.Filter):
+    """Logging filter that silences WARNING-level records from the MLflow GPU monitor.
 
-    MLflow's gpu_monitor emits a WARNING every polling interval for NVML queries
-    unsupported on embedded/Jetson GPUs (e.g. GB10). We must apply this patch
-    immediately before starting SystemMetricsMonitor because mlflow.__init__ calls
-    _configure_mlflow_loggers() via dictConfig, which resets all child logger levels
-    to NOTSET — so any earlier patch is undone. Patching here, just before start(),
-    wins the race against the monitor's background thread.
+    Using a filter rather than setLevel because logging.config.dictConfig (called by
+    mlflow.__init__) resets logger levels on existing loggers but does not clear their
+    filters — so this approach is robust to any subsequent dictConfig calls.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno >= logging.ERROR
+
+
+def _suppress_gpu_monitor_warnings_if_needed() -> None:
+    """Attach a filter to the MLflow GPU monitor logger for embedded NVIDIA GPUs.
+
+    Embedded/Jetson GPUs (e.g. GB10) do not support all NVML queries. MLflow's
+    gpu_monitor emits a WARNING on every polling interval for each unsupported query.
+    We attach a filter (not setLevel) because dictConfig resets logger levels but
+    preserves filters, making this robust to mlflow's internal logger reconfiguration.
     """
     if not torch.cuda.is_available():
         return
@@ -33,7 +43,7 @@ def _suppress_gpu_monitor_warnings_if_needed() -> None:
         for i in range(torch.cuda.device_count())
     ):
         return
-    _gpu_monitor_mod._logger.setLevel(logging.ERROR)
+    _gpu_monitor_mod._logger.addFilter(_SuppressGpuWarningsFilter())
 
 
 def _get_system_tags() -> dict[str, str]:
