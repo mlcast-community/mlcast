@@ -1,5 +1,7 @@
 import torch
 import torchvision
+from PIL import Image
+from pytorch_lightning.loggers import MLFlowLogger, TensorBoardLogger
 
 
 def apply_radar_colormap(tensor: torch.Tensor) -> torch.Tensor:
@@ -62,16 +64,22 @@ def apply_radar_colormap(tensor: torch.Tensor) -> torch.Tensor:
     return output
 
 
+def _tensor_to_pil(grid: torch.Tensor) -> Image.Image:
+    """Convert a CHW float tensor in [0, 1] to a PIL image."""
+    arr = (grid.permute(1, 2, 0).cpu().numpy() * 255).clip(0, 255).astype("uint8")
+    return Image.fromarray(arr)
+
+
 def log_images(
     past: torch.Tensor,
     future: torch.Tensor,
     preds: torch.Tensor,
-    logger_experiment,
+    logger: TensorBoardLogger | MLFlowLogger,
     global_step: int,
     ensemble_size: int = 1,
     split: str = "val",
 ) -> None:
-    """Log radar image grids to TensorBoard."""
+    """Log radar image grids to TensorBoard or MLflow."""
     sample_idx = 0
 
     past_sample = past[sample_idx]
@@ -80,7 +88,6 @@ def log_images(
     past_norm = (past_sample + 1) / 2
     past_rgb = apply_radar_colormap(past_norm)
     past_grid = torchvision.utils.make_grid(past_rgb, nrow=past_sample.shape[0])
-    logger_experiment.add_image(f"{split}/past", past_grid, global_step)
 
     future_sample = future[sample_idx]
     preds_sample = preds[sample_idx]
@@ -88,21 +95,19 @@ def log_images(
     if ensemble_size > 1:
         preds_avg = preds_sample.mean(dim=1, keepdim=True)
         num_members_to_log = min(3, preds_sample.shape[1])
-
-        rows = [future_sample]
-        rows.append(preds_avg)
-        for i in range(num_members_to_log):
-            rows.append(preds_sample[:, i : i + 1, :, :])
-
-        all_frames = torch.cat(rows, dim=0)
-        all_frames_norm = (all_frames + 1) / 2
-        all_frames_rgb = apply_radar_colormap(all_frames_norm)
-        grid = torchvision.utils.make_grid(all_frames_rgb, nrow=future_sample.shape[0])
-        logger_experiment.add_image(f"{split}/preds", grid, global_step)
+        rows = [future_sample, preds_avg] + [preds_sample[:, i : i + 1] for i in range(num_members_to_log)]
     else:
         rows = [future_sample, preds_sample]
-        all_frames = torch.cat(rows, dim=0)
-        all_frames_norm = (all_frames + 1) / 2
-        all_frames_rgb = apply_radar_colormap(all_frames_norm)
-        grid = torchvision.utils.make_grid(all_frames_rgb, nrow=future_sample.shape[0])
-        logger_experiment.add_image(f"{split}/preds", grid, global_step)
+
+    all_frames = torch.cat(rows, dim=0)
+    all_frames_norm = (all_frames + 1) / 2
+    all_frames_rgb = apply_radar_colormap(all_frames_norm)
+    preds_grid = torchvision.utils.make_grid(all_frames_rgb, nrow=future_sample.shape[0])
+
+    if isinstance(logger, TensorBoardLogger):
+        logger.experiment.add_image(f"{split}/past", past_grid, global_step)
+        logger.experiment.add_image(f"{split}/preds", preds_grid, global_step)
+    elif isinstance(logger, MLFlowLogger):
+        run_id = logger.run_id
+        logger.experiment.log_image(run_id, _tensor_to_pil(past_grid), f"{split}/past_step{global_step}.png")
+        logger.experiment.log_image(run_id, _tensor_to_pil(preds_grid), f"{split}/preds_step{global_step}.png")

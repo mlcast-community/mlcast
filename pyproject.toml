@@ -41,9 +41,11 @@ dependencies = [
   "ipykernel>=6.29.5",
   "jaxtyping>=0.2",
   "loguru>=0.7.3",
-  "mlflow>=3.11.1",
+  "mlflow[mlflow]>=3.11.1",
   "numpy>=2.2.6",
+  "nvidia-ml-py[mlflow]>=13.595.45",
   "pandas>=2",
+  "psutil[mlflow]>=7.2.2",
   "pytorch-lightning>=2",
   "pyyaml>=6",
   "s3fs>=2026.3",
@@ -80,10 +82,7 @@ urls.Repository = "https://github.com/mlcast-community/mlcast"
 scripts.mlcast = "mlcast.__main__:cli"
 
 [dependency-groups]
-mlflow = [
-  "nvidia-ml-py>=13.595.45",
-  "psutil>=7",
-]
+mlflow = [  ]
 
 [tool.ruff]
 line-length = 120

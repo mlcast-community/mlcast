@@ -1,7 +1,12 @@
 """Fiddler mutators for high-level semantic configuration changes."""
 
-import fiddle as fdl
+import os
 
+import fiddle as fdl
+from loguru import logger
+from pytorch_lightning.loggers import MLFlowLogger
+
+from ..callbacks import LogSystemInfoCallback
 from ..data.source_datasets import SourceDataRandomSamplingDataset
 
 
@@ -73,3 +78,26 @@ def use_anon_s3_dataset(cfg: fdl.Buildable, zarr_path: str, endpoint_url: str) -
         },
         "config_kwargs": {"signature_version": "s3v4"},
     }
+
+
+def use_mlflow_logger(cfg: fdl.Config) -> None:
+    """Fiddler to switch the trainer logger to MLflow.
+
+    Replaces the default TensorBoardLogger with an MLFlowLogger, inheriting
+    the experiment name from the existing logger config. The tracking URI and
+    run name are left unset, deferring to the ``MLFLOW_TRACKING_URI`` and
+    ``MLFLOW_RUN_NAME`` environment variables (or MLflow defaults).
+
+    Parameters
+    ----------
+    cfg : fdl.Config
+        The Fiddle configuration to mutate.
+    """
+    if not os.environ.get("MLFLOW_TRACKING_URI"):
+        logger.warning(
+            "MLFLOW_TRACKING_URI is not set. MLflow will log to a local './mlruns' directory. "
+            "Set MLFLOW_TRACKING_URI to point to a remote tracking server, "
+            "e.g. export MLFLOW_TRACKING_URI=http://localhost:5000"
+        )
+    cfg.trainer.logger = fdl.Config(MLFlowLogger, experiment_name=cfg.trainer.logger.name)
+    cfg.trainer.callbacks.append(LogSystemInfoCallback())

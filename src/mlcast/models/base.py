@@ -2,7 +2,7 @@
 
 Wraps an injected PyTorch :class:`nn.Module` (the network architecture) and
 handles training, validation, and test steps including loss computation,
-ensemble generation, and TensorBoard image logging.
+ensemble generation, and image logging.
 """
 
 from collections.abc import Callable
@@ -159,7 +159,7 @@ class NowcastLightningModule(pl.LightningModule):
                 past=past,
                 future=future,
                 preds=preds,
-                logger_experiment=self.logger.experiment,  # type: ignore
+                logger=self.logger,  # type: ignore
                 global_step=self.global_step,
                 ensemble_size=self.hparams["ensemble_size"],
                 split=split,

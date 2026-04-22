@@ -2226,7 +2226,9 @@ dependencies = [
     { name = "loguru" },
     { name = "mlflow" },
     { name = "numpy" },
+    { name = "nvidia-ml-py" },
     { name = "pandas" },
+    { name = "psutil" },
     { name = "pytorch-lightning" },
     { name = "pyyaml" },
     { name = "s3fs" },
@@ -2261,12 +2263,6 @@ gpu-cu130 = [
     { name = "torchvision", version = "0.26.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" } },
 ]
 
-[package.dev-dependencies]
-mlflow = [
-    { name = "nvidia-ml-py" },
-    { name = "psutil" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "absl-py", specifier = ">=2.4" },
@@ -2281,11 +2277,13 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "jaxtyping", specifier = ">=0.2" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "mlflow", specifier = ">=3.11.1" },
+    { name = "mlflow", extras = ["mlflow"], specifier = ">=3.11.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1" },
     { name = "numpy", specifier = ">=2.2.6" },
+    { name = "nvidia-ml-py", extras = ["mlflow"], specifier = ">=13.595.45" },
     { name = "pandas", specifier = ">=2" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.5" },
+    { name = "psutil", extras = ["mlflow"], specifier = ">=7.2.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },
     { name = "pytorch-lightning", specifier = ">=2" },
@@ -2306,10 +2304,7 @@ requires-dist = [
 provides-extras = ["dev", "gpu-cu128", "gpu-cu130"]
 
 [package.metadata.requires-dev]
-mlflow = [
-    { name = "nvidia-ml-py", specifier = ">=13.595.45" },
-    { name = "psutil", specifier = ">=7.0.0" },
-]
+mlflow = []
 
 [[package]]
 name = "mlflow"
