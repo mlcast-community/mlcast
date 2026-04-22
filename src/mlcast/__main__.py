@@ -26,7 +26,6 @@ import sys
 import fiddle as fdl
 from absl import app, flags
 from fiddle import absl_flags
-from loguru import logger
 
 from . import config  # noqa: F401 — module must be importable for absl_flags
 from .config import train_from_config, training_experiment
@@ -116,31 +115,37 @@ def _build_help_text(cfg: fdl.Buildable) -> str:
     return "\n".join(lines)
 
 
-def check_unquoted_fiddle_strings(remaining: list[str]) -> None:
-    """Warns users if they pass unquoted strings for Fiddle overrides.
+def auto_quote_fiddle_strings(remaining: list[str]) -> list[str]:
+    """Auto-quotes unquoted string values in Fiddle set: overrides.
 
-    Fiddle uses `ast.literal_eval` to parse CLI override values. This requires users
-    to provide double quotes in Bash (e.g. `--config set:a.b="'string'"`). This function
-    detects unquoted string values that will likely fail evaluation and warns the user.
+    Fiddle uses `ast.literal_eval` to parse CLI override values, requiring string
+    values to be explicitly quoted (e.g. `--config set:a.b="'string'"`). This function
+    detects values that fail `ast.literal_eval` and wraps them in single quotes
+    automatically, so users can pass bare strings without double-quoting.
     """
+    remaining = list(remaining)
     i = 0
     while i < len(remaining):
         arg = remaining[i]
+        key = None
         val = None
+        form = None  # "split" or "inline"
 
         # Match `--config set:a.b=c`
         if arg == "--config" and i + 1 < len(remaining) and remaining[i + 1].startswith("set:"):
             set_arg = remaining[i + 1]
             parts = set_arg.split("=", 1)
             if len(parts) == 2:
-                val = parts[1]
+                key, val = parts[0], parts[1]
+                form = "split"
             i += 2
 
         # Match `--config=set:a.b=c`
         elif arg.startswith("--config=set:"):
             parts = arg.split("=", 2)
             if len(parts) == 3:
-                val = parts[2]
+                key, val = parts[1], parts[2]
+                form = "inline"
             i += 1
         else:
             i += 1
@@ -150,11 +155,13 @@ def check_unquoted_fiddle_strings(remaining: list[str]) -> None:
             try:
                 ast.literal_eval(val)
             except (ValueError, SyntaxError):
-                logger.warning(
-                    f"Possible unquoted string detected: {val}. "
-                    "Fiddle requires string overrides to be explicitly quoted. "
-                    f"If parsing fails, try using: \"'{val}'\""
-                )
+                quoted_val = f"'{val}'"
+                if form == "split":
+                    remaining[i - 1] = f"{key}={quoted_val}"
+                else:
+                    remaining[i - 1] = f"--config={key}={quoted_val}"
+
+    return remaining
 
 
 def train_main(argv: list[str]) -> None:
@@ -239,8 +246,8 @@ def cli() -> None:
         if not has_base_config:
             remaining = ["--config=config:training_experiment"] + remaining
 
-        # Warn the user if they passed unquoted string values intended for Fiddle
-        check_unquoted_fiddle_strings(remaining)
+        # Auto-quote any unquoted string values intended for Fiddle
+        remaining = auto_quote_fiddle_strings(remaining)
 
         app.run(train_main, argv=[sys.argv[0]] + remaining)
 
