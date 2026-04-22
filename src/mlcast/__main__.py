@@ -24,6 +24,7 @@ import ast
 import sys
 
 import fiddle as fdl
+import torch
 from absl import app, flags
 from fiddle import absl_flags
 
@@ -199,6 +200,7 @@ def train_main(argv: list[str]) -> None:
     if _config.value is None:
         print("Error: --config flag is required.", file=sys.stderr)
         sys.exit(1)
+    torch.set_float32_matmul_precision("high")
     train_from_config(_config.value)
 
 
