@@ -41,6 +41,7 @@ dependencies = [
   "ipykernel>=6.29.5",
   "jaxtyping>=0.2",
   "loguru>=0.7.3",
+  "mlflow>=3.11.1",
   "numpy>=2.2.6",
   "pandas>=2",
   "pytorch-lightning>=2",
@@ -63,12 +64,26 @@ optional-dependencies.dev = [
   "ruff>=0.8",
   "s3fs>=2024.2",
 ]
+optional-dependencies.gpu-cu128 = [
+  "torch>=2.7.1",
+  "torchvision>=0.20",
+]
+optional-dependencies.gpu-cu130 = [
+  "torch>=2.7.1",
+  "torchvision>=0.20",
+]
 urls.Documentation = "https://github.com/mlcast-community/mlcast"
 urls.Homepage = "https://github.com/mlcast-community/mlcast"
 urls.Issues = "https://github.com/mlcast-community/mlcast/issues"
 urls.Repository = "https://github.com/mlcast-community/mlcast"
 
 scripts.mlcast = "mlcast.__main__:cli"
+
+[dependency-groups]
+mlflow = [
+  "nvidia-ml-py>=13.595.45",
+  "psutil>=7",
+]
 
 [tool.ruff]
 line-length = 120
@@ -101,3 +116,31 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "gpu-cu128" },
+    { extra = "gpu-cu130" },
+  ],
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu128", extra = "gpu-cu128" },
+  { index = "pytorch-cu130", extra = "gpu-cu130" },
+]
+torchvision = [
+  { index = "pytorch-cu128", extra = "gpu-cu128" },
+  { index = "pytorch-cu130", extra = "gpu-cu130" },
+]

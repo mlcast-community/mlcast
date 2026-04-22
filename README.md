@@ -56,8 +56,14 @@ This project uses `uv` for dependency management. To set up the development envi
 # Install uv if not already installed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install dependencies
+# Install dependencies (CPU)
 uv sync
+
+# Install dependencies (GPU, CUDA 12.8)
+uv sync --extra gpu-cu128
+
+# Install dependencies (GPU, CUDA 13.0)
+uv sync --extra gpu-cu130
 
 # Run pre-commit hooks
 uv run pre-commit install
