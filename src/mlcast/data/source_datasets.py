@@ -66,13 +66,41 @@ class SourceDataPrecomputedSamplingDataset(Dataset):
         width: int = 256,
         height: int = 256,
         time_depth: int = 24,
+        storage_options: dict[str, Any] | None = None,
     ) -> None:
         self.coords = pd.read_csv(csv_path).sort_values("t")
         if time_slice is not None:
             self.coords = self.coords.iloc[time_slice].reset_index(drop=True)
 
-        self.ds = xr.open_zarr(zarr_path)
+        self.storage_options = storage_options
+        self.ds = xr.open_zarr(zarr_path, storage_options=self.storage_options)
         self.standard_names = standard_names
+
+        for std_name in self.standard_names:
+            try:
+                # Validate that the CF standard name exists
+                _ = self.ds.cf[std_name]
+            except KeyError as e:
+                if hasattr(self.ds.cf, "standard_names"):
+                    available_cf_names = list(self.ds.cf.standard_names.keys())
+                else:
+                    available_cf_names = []
+
+                if not available_cf_names:
+                    msg = (
+                        f"Requested CF standard_name '{std_name}' not found. "
+                        "In fact, this dataset has NO variables with a 'standard_name' CF attribute. "
+                        "Please ensure the Zarr dataset is properly formatted with CF conventions."
+                    )
+                else:
+                    msg = (
+                        f"Requested CF standard_name '{std_name}' not found in the dataset.\n"
+                        f"Available CF standard names: {available_cf_names}\n"
+                        f"\nHint: You can change the requested variables via the CLI using:\n"
+                        f"  --config \"fiddler:set_variables(standard_names=['<correct_name>'])\""
+                    )
+                raise ValueError(msg) from e
+
         self.rng = np.random.default_rng(seed=42) if deterministic else np.random.default_rng(int(time.time()))
         self.return_mask = return_mask
         self.augment = augment
@@ -237,13 +265,41 @@ class SourceDataRandomSamplingDataset(Dataset):
         width: int = 256,
         height: int = 256,
         epoch_size: int = 1000,
+        storage_options: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        self.ds = xr.open_zarr(zarr_path)
+        self.storage_options = storage_options
+        self.ds = xr.open_zarr(zarr_path, storage_options=self.storage_options)
         if time_slice is not None:
             self.ds = self.ds.isel(time=time_slice)
 
         self.standard_names = standard_names
+
+        for std_name in self.standard_names:
+            try:
+                # Validate that the CF standard name exists
+                _ = self.ds.cf[std_name]
+            except KeyError as e:
+                if hasattr(self.ds.cf, "standard_names"):
+                    available_cf_names = list(self.ds.cf.standard_names.keys())
+                else:
+                    available_cf_names = []
+
+                if not available_cf_names:
+                    msg = (
+                        f"Requested CF standard_name '{std_name}' not found. "
+                        "In fact, this dataset has NO variables with a 'standard_name' CF attribute. "
+                        "Please ensure the Zarr dataset is properly formatted with CF conventions."
+                    )
+                else:
+                    msg = (
+                        f"Requested CF standard_name '{std_name}' not found in the dataset.\n"
+                        f"Available CF standard names: {available_cf_names}\n"
+                        f"\nHint: You can change the requested variables via the CLI using:\n"
+                        f"  --config \"fiddler:set_variables(standard_names=['<correct_name>'])\""
+                    )
+                raise ValueError(msg) from e
+
         self.rng = np.random.default_rng(seed=42) if deterministic else np.random.default_rng(int(time.time()))
         self.return_mask = return_mask
         self.augment = augment

@@ -7,6 +7,7 @@ loss instances by name.
 from typing import Any
 
 import torch
+from loguru import logger
 from torch import nn
 
 
@@ -86,7 +87,11 @@ class MaskedLoss(LossWithReduction):
             else:
                 return masked_loss
         else:
-            return torch.tensor(0.0, device=preds.device)
+            logger.warning(
+                "Encountered a training batch with all NaNs (completely masked). "
+                "The loss and gradients for this batch will be exactly zero."
+            )
+            return masked_loss.sum() * 0.0
 
 
 class CRPS(LossWithReduction):

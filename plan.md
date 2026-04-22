@@ -58,23 +58,25 @@
    - [x] Ensure it mathematically pads to `2 ** num_blocks` before the encoder, and crops it back before returning.
 
 ## Phase 5: The Fiddle Config & Validation (The Orchestrator)
-- [ ] **Tests**: Create `tests/test_configs.py`.
-   - [ ] Generate a `base_experiment` config, break contracts intentionally, and assert `train_from_config` raises `ValueError`.
-- [ ] **`src/mlcast/configs.py` (Base Config)**:
-   - [ ] Define the `dataset_factory` using `fdl.Partial`.
-   - [ ] Inject both the `dataset_factory` into the `DataModule` and the network into the generic `LightningModule`.
-- [ ] **`src/mlcast/configs.py` (Validation in `train_from_config`)**:
-   - [ ] Contract 1: Network `input_channels` == `len(dataset_factory.standard_names)`.
-   - [ ] Contract 2: Dataset `width` must be divisible by `2 ** network.num_blocks`.
-   - [ ] Contract 3: Dataset `steps` > `forecast_steps`.
-   - [ ] Contract 4: Ensemble models require CRPS or AFCRPS.
+- [x] **Tests**: Split `tests/test_configs.py` into the `tests/config/` directory.
+   - [x] Generate a `base_experiment` config, break contracts intentionally, and assert `validate_config` raises `ValueError`.
+- [x] **`src/mlcast/config/base.py` (Base Config)**:
+   - [x] Define the `dataset_factory` using `fdl.Partial`.
+   - [x] Inject both the `dataset_factory` into the `DataModule` and the network into the generic `LightningModule`.
+- [x] **`src/mlcast/config/consistency_checks.py` (Validation in `validate_config`)**:
+   - [x] Contract 1: Network `input_channels` == `len(dataset_factory.standard_names)`.
+   - [x] Contract 2: Dataset `width` must be divisible by `2 ** network.num_blocks`.
+   - [x] Contract 3: Dataset `steps` > `forecast_steps`.
+   - [x] Contract 4: Ensemble models require CRPS or AFCRPS.
+- [x] **`src/mlcast/config/orchestrator.py`**:
+   - [x] Call `validate_config` before `fdl.build(cfg)` in `train_from_config`.
 
 ## Phase 6: Fiddlers for UX & Synchronization
-- [ ] **Tests**: Update `tests/test_configs.py`.
-   - [ ] Test that Fiddlers (`set_variables`, `toggle_masking`) successfully mutate the dataset and the model simultaneously.
-- [ ] **`src/mlcast/configs.py` (Fiddlers)**:
-   - [ ] Create `set_variables(cfg, standard_names: list[str])` to sync the dataset and the network's `input_channels`.
-   - [ ] Create `toggle_masking(cfg, enabled: bool)` to sync `cfg.data.dataset_factory.return_mask` with `cfg.pl_module.masked_loss`.
+- [x] **Tests**: Added tests for fiddlers in `tests/config/test_fiddlers.py`.
+   - [x] Test that Fiddlers (`set_variables`, `toggle_masking`) successfully mutate the dataset and the model simultaneously.
+- [x] **`src/mlcast/config/fiddlers.py` (Fiddlers)**:
+   - [x] Create `set_variables(cfg, standard_names: list[str])` to sync the dataset and the network's `input_channels`.
+   - [x] Create `toggle_masking(cfg, enabled: bool)` to sync `cfg.data.dataset_factory.return_mask` with `cfg.pl_module.masked_loss`.
 
 ## Phase 7: Documentation
 - [ ] **Docs (`README.md`)**:

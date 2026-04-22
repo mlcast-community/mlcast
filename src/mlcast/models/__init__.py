@@ -1,4 +1,3 @@
-from .base import NowcastingLightningModule, NowcastingModelBase
-from .convgru import RadarLightningModel
+from .base import NowcastLightningModule
 
-__all__ = ["NowcastingModelBase", "NowcastingLightningModule", "RadarLightningModel"]
+__all__ = ["NowcastLightningModule"]

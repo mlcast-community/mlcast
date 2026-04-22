@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytorch_lightning as pl
+from loguru import logger
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -64,6 +65,28 @@ class SourceDataDataModule(pl.LightningDataModule):
 
         train_end = int(n * self.train_ratio)
         val_end = int(n * (self.train_ratio + self.val_ratio))
+
+        min_steps = getattr(base_dataset, "steps", 1)
+
+        train_steps = train_end
+        val_steps = val_end - train_end
+        test_steps = n - val_end
+
+        if train_steps < min_steps and self.train_ratio > 0:
+            logger.warning(
+                f"Training split has only {train_steps} time steps, "
+                f"but model sequence requires {min_steps}. Training may crash or skip this split."
+            )
+        if val_steps < min_steps and self.val_ratio > 0:
+            logger.warning(
+                f"Validation split has only {val_steps} time steps, "
+                f"but model sequence requires {min_steps}. Validation may crash or skip this split."
+            )
+        if test_steps < min_steps and (1 - self.train_ratio - self.val_ratio) > 1e-5:
+            logger.warning(
+                f"Test split has only {test_steps} time steps, "
+                f"but model sequence requires {min_steps}. Testing may crash or skip this split."
+            )
 
         self.train_dataset = self.dataset_factory(
             time_slice=slice(0, train_end),

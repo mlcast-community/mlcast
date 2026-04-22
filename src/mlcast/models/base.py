@@ -5,6 +5,7 @@ handles training, validation, and test steps including loss computation,
 ensemble generation, and TensorBoard image logging.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -39,14 +40,12 @@ class NowcastLightningModule(pl.LightningModule):
         Keyword arguments for the loss constructor. Default is ``None``.
     masked_loss : bool, optional
         Whether to wrap the loss with :class:`MaskedLoss`. Default is ``False``.
-    optimizer_class : type or None, optional
-        Optimizer class. Default is ``None`` (Adam).
-    optimizer_params : dict or None, optional
-        Keyword arguments for the optimizer. Default is ``None``.
-    lr_scheduler_class : type or None, optional
-        Learning rate scheduler class. Default is ``None``.
-    lr_scheduler_params : dict or None, optional
-        Keyword arguments for the LR scheduler. Default is ``None``.
+    optimizer : Callable[..., torch.optim.Optimizer] or None, optional
+        A callable (e.g., a ``functools.partial``) that takes network parameters
+        and returns an instantiated optimizer. Default is ``None`` (Adam).
+    lr_scheduler : Callable[..., torch.optim.lr_scheduler.LRScheduler] or None, optional
+        A callable (e.g., a ``functools.partial``) that takes an optimizer
+        and returns an instantiated learning rate scheduler. Default is ``None``.
     """
 
     def __init__(
@@ -57,15 +56,15 @@ class NowcastLightningModule(pl.LightningModule):
         loss_class: type[torch.nn.Module] | str = "mse",
         loss_params: dict[str, Any] | None = None,
         masked_loss: bool = False,
-        optimizer_class: type[torch.optim.Optimizer] | None = None,
-        optimizer_params: dict[str, Any] | None = None,
-        lr_scheduler_class: type | None = None,
-        lr_scheduler_params: dict[str, Any] | None = None,
+        optimizer: Callable[..., torch.optim.Optimizer] | None = None,
+        lr_scheduler: Callable[..., torch.optim.lr_scheduler.LRScheduler] | None = None,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(ignore=["network"])
+        self.save_hyperparameters(ignore=["network", "optimizer", "lr_scheduler"])
 
         self.network = network
+        self.optimizer_factory = optimizer
+        self.lr_scheduler_factory = lr_scheduler
 
         self.criterion = build_loss(
             loss_class=self.hparams["loss_class"],
@@ -227,23 +226,13 @@ class NowcastLightningModule(pl.LightningModule):
             A dictionary containing the instantiated ``"optimizer"`` and
             optionally ``"lr_scheduler"`` configurations for PyTorch Lightning.
         """
-        if self.hparams["optimizer_class"] is not None:
-            optimizer_class = self.hparams["optimizer_class"]
-            optimizer = (
-                optimizer_class(self.parameters(), **self.hparams["optimizer_params"])
-                if self.hparams["optimizer_params"] is not None
-                else optimizer_class(self.parameters())
-            )
+        if self.optimizer_factory is not None:
+            optimizer = self.optimizer_factory(self.parameters())
         else:
             optimizer = torch.optim.Adam(self.parameters())
 
-        if self.hparams["lr_scheduler_class"] is not None:
-            lr_scheduler_class = self.hparams["lr_scheduler_class"]
-            lr_scheduler = (
-                lr_scheduler_class(optimizer, **self.hparams["lr_scheduler_params"])
-                if self.hparams["lr_scheduler_params"] is not None
-                else lr_scheduler_class(optimizer)
-            )
+        if self.lr_scheduler_factory is not None:
+            lr_scheduler = self.lr_scheduler_factory(optimizer)
             return {"optimizer": optimizer, "lr_scheduler": {"scheduler": lr_scheduler, "monitor": "val_loss"}}
         else:
             return {"optimizer": optimizer}
