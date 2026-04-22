@@ -73,7 +73,9 @@ class SourceDataPrecomputedSamplingDataset(Dataset):
             self.coords = self.coords.iloc[time_slice].reset_index(drop=True)
 
         self.storage_options = storage_options
-        self.ds = xr.open_zarr(zarr_path, storage_options=self.storage_options)
+        self._zarr_path = zarr_path
+        self._time_slice: slice | None = None
+        self._ds: xr.Dataset | None = None
         self.standard_names = standard_names
 
         for std_name in self.standard_names:
@@ -133,6 +135,32 @@ class SourceDataPrecomputedSamplingDataset(Dataset):
 
         if self.steps > self.dt:
             print(f"Warning: requested steps ({self.steps}) > sampled time window ({self.dt})")
+
+        # Close the store: metadata has been extracted into plain attributes above.
+        # Each DataLoader worker will reopen it via the `ds` property in its own
+        # event loop, avoiding asyncio "Future attached to a different loop" errors.
+        self._ds = None
+
+    @property
+    def ds(self) -> xr.Dataset:
+        """Open and cache the Zarr-backed xarray Dataset for this worker.
+
+        The store is opened lazily on first access within each process. This
+        avoids pickling live asyncio connections across DataLoader worker
+        boundaries, which would cause ``RuntimeError: Future attached to a
+        different loop``.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The opened (and optionally time-sliced) xarray Dataset.
+        """
+        if self._ds is None:
+            ds = xr.open_zarr(self._zarr_path, storage_options=self.storage_options)
+            if self._time_slice is not None:
+                ds = ds.isel(time=self._time_slice)
+            self._ds = ds
+        return self._ds
 
     def __len__(self) -> int:
         """Get the number of samples in the dataset.
@@ -269,10 +297,9 @@ class SourceDataRandomSamplingDataset(Dataset):
         **kwargs: Any,
     ) -> None:
         self.storage_options = storage_options
-        self.ds = xr.open_zarr(zarr_path, storage_options=self.storage_options)
-        if time_slice is not None:
-            self.ds = self.ds.isel(time=time_slice)
-
+        self._zarr_path = zarr_path
+        self._time_slice = time_slice
+        self._ds: xr.Dataset | None = None
         self.standard_names = standard_names
 
         for std_name in self.standard_names:
@@ -340,6 +367,32 @@ class SourceDataRandomSamplingDataset(Dataset):
             raise ValueError(f"Requested height ({self.h}) > available Y dimension ({self.max_y})")
         if self.w > self.max_x:
             raise ValueError(f"Requested width ({self.w}) > available X dimension ({self.max_x})")
+
+        # Close the store: metadata has been extracted into plain attributes above.
+        # Each DataLoader worker will reopen it via the `ds` property in its own
+        # event loop, avoiding asyncio "Future attached to a different loop" errors.
+        self._ds = None
+
+    @property
+    def ds(self) -> xr.Dataset:
+        """Open and cache the Zarr-backed xarray Dataset for this worker.
+
+        The store is opened lazily on first access within each process. This
+        avoids pickling live asyncio connections across DataLoader worker
+        boundaries, which would cause ``RuntimeError: Future attached to a
+        different loop``.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            The opened (and optionally time-sliced) xarray Dataset.
+        """
+        if self._ds is None:
+            ds = xr.open_zarr(self._zarr_path, storage_options=self.storage_options)
+            if self._time_slice is not None:
+                ds = ds.isel(time=self._time_slice)
+            self._ds = ds
+        return self._ds
 
     def __len__(self) -> int:
         """Get the number of samples in the dataset.
