@@ -210,12 +210,60 @@ def normalized_to_rainfall_flux(normalized: np.ndarray) -> np.ndarray:
     return reflectivity_to_rainfall_flux(reflectivity)
 
 
+_SECONDS_PER_HOUR = 3600.0
+_5MIN_ACCUMULATION_HOURS = 5 * 60 / _SECONDS_PER_HOUR  # = 1/12
+
+
+def rainfall_amount_5min_to_normalized(rainfall_amount: np.ndarray) -> np.ndarray:
+    """Convert 5-minute rainfall amount (kg m-2 = mm) to normalized reflectivity.
+
+    Converts to an equivalent rainfall rate (mm/h) by dividing by the 5-minute
+    accumulation period (1/12 h), then applies the Marshall-Palmer Z-R relationship
+    and normalizes to [-1, 1].
+
+    Parameters
+    ----------
+    rainfall_amount : np.ndarray
+        5-minute accumulated rainfall in kg m-2 (= mm). Can be any shape.
+
+    Returns
+    -------
+    normalized : np.ndarray
+        Normalized reflectivity in [-1, 1]. Same shape as input.
+    """
+    rainfall_rate = rainfall_amount / _5MIN_ACCUMULATION_HOURS
+    return rainfall_rate_to_normalized(rainfall_rate)
+
+
+def normalized_to_rainfall_amount_5min(normalized: np.ndarray) -> np.ndarray:
+    """Convert normalized reflectivity back to 5-minute rainfall amount (kg m-2).
+
+    Inverts :func:`rainfall_amount_5min_to_normalized`: denormalizes to reflectivity,
+    applies the inverse Marshall-Palmer relationship to get rainfall rate (mm/h),
+    then multiplies by the 5-minute accumulation period (1/12 h).
+
+    Parameters
+    ----------
+    normalized : np.ndarray
+        Normalized reflectivity in [-1, 1]. Can be any shape.
+
+    Returns
+    -------
+    rainfall_amount : np.ndarray
+        5-minute accumulated rainfall in kg m-2 (= mm). Same shape as input.
+    """
+    rainfall_rate = normalized_to_rainfall_rate(normalized)
+    return rainfall_rate * _5MIN_ACCUMULATION_HOURS
+
+
 NORMALIZATION_REGISTRY = {
     "rainfall_rate": rainfall_rate_to_normalized,
     "rainfall_flux": rainfall_flux_to_normalized,
+    "rainfall_amount": rainfall_amount_5min_to_normalized,
 }
 
 DENORMALIZATION_REGISTRY = {
     "rainfall_rate": normalized_to_rainfall_rate,
     "rainfall_flux": normalized_to_rainfall_flux,
+    "rainfall_amount": normalized_to_rainfall_amount_5min,
 }
