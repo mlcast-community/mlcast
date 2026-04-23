@@ -11,7 +11,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 
 from ..data.source_data_module import SourceDataDataModule
 from ..data.source_datasets import SourceDataPrecomputedSamplingDataset
-from ..models.convgru_modules import ConvGruModel
+from ..models.convgru import ConvGruModel
 from ..nowcasting_module import NowcastLightningModule
 
 

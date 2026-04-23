@@ -1,3 +1,3 @@
-from .convgru_modules import ConvGruModel
+from .convgru import ConvGruModel
 
 __all__ = ["ConvGruModel"]

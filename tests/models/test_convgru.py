@@ -1,6 +1,6 @@
 import torch
 
-from mlcast.models.convgru_modules import ConvGruModel
+from mlcast.models.convgru import ConvGruModel
 
 
 def test_convgru_dynamic_padding():
