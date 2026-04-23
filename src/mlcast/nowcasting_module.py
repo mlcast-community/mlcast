@@ -60,16 +60,17 @@ class NowcastLightningModule(pl.LightningModule):
         lr_scheduler: Callable[..., torch.optim.lr_scheduler.LRScheduler] | None = None,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(ignore=["network", "optimizer", "lr_scheduler"])
+        # Explicitly save hyperparameters that are accessed later via self.hparams
+        self.save_hyperparameters("ensemble_size", "forecast_steps", "loss_class", "loss_params", "masked_loss")
 
         self.network = network
         self.optimizer_factory = optimizer
         self.lr_scheduler_factory = lr_scheduler
 
         self.criterion = build_loss(
-            loss_class=self.hparams["loss_class"],
-            loss_params=self.hparams["loss_params"],
-            masked_loss=self.hparams["masked_loss"],
+            loss_class=loss_class,
+            loss_params=loss_params,
+            masked_loss=masked_loss,
         )
         self.log_images_iterations = [50, 100, 200, 500, 750, 1000, 2000, 5000]
 
@@ -166,7 +167,7 @@ class NowcastLightningModule(pl.LightningModule):
             )
         return loss
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(self, batch: dict[str, torch.Tensor], _batch_idx: int) -> torch.Tensor:
         """Execute a single training step.
 
         Parameters
@@ -183,7 +184,7 @@ class NowcastLightningModule(pl.LightningModule):
         """
         return self.shared_step(batch, split="train")
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def validation_step(self, batch: dict[str, torch.Tensor], _batch_idx: int) -> torch.Tensor:
         """Execute a single validation step.
 
         Parameters
@@ -200,7 +201,7 @@ class NowcastLightningModule(pl.LightningModule):
         """
         return self.shared_step(batch, split="val", ensemble_size=10)
 
-    def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def test_step(self, batch: dict[str, torch.Tensor], _batch_idx: int) -> torch.Tensor:
         """Execute a single test step.
 
         Parameters
@@ -293,7 +294,6 @@ class NowcastLightningModule(pl.LightningModule):
         if len(past.shape) != 3:
             raise ValueError("Input must be of shape (T, H, W)")
 
-        T, H, W = past.shape
         ensemble_size = self.hparams["ensemble_size"] if ensemble_size is None else ensemble_size
 
         past_clean = np.nan_to_num(past.cpu().numpy())
