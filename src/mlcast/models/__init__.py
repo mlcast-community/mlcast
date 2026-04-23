@@ -1,3 +1,3 @@
-from .base import NowcastLightningModule
+from .convgru_modules import ConvGruModel
 
-__all__ = ["NowcastLightningModule"]
+__all__ = ["ConvGruModel"]
