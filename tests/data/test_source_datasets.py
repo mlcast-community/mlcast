@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 import pytest
 import torch
@@ -7,11 +9,9 @@ from mlcast.data.source_datasets import (
     SourceDataRandomSamplingDataset,
 )
 
-ZARR_PATH = ".pytest_cache/italian_dataset_v0.1.0_100t.zarr"
-
 
 @pytest.fixture
-def mock_csv(tmp_path):
+def mock_csv(tmp_path: Path) -> str:
     """Create a temporary CSV file with coordinates."""
     df = pd.DataFrame(
         {
@@ -25,10 +25,10 @@ def mock_csv(tmp_path):
     return str(csv_path)
 
 
-def test_precomputed_sampling_dataset(italian_dataset, mock_csv):
+def test_precomputed_sampling_dataset(fp_test_dataset: Path, mock_csv: str) -> None:
     """Test that SourceDataPrecomputedSamplingDataset outputs the correct shape."""
     ds = SourceDataPrecomputedSamplingDataset(
-        zarr_path=ZARR_PATH,
+        zarr_path=str(fp_test_dataset),
         csv_path=mock_csv,
         standard_names=["rainfall_flux"],
         steps=3,
@@ -53,18 +53,22 @@ def test_precomputed_sampling_dataset(italian_dataset, mock_csv):
     assert isinstance(mask, torch.Tensor)
 
 
-def test_precomputed_sampling_dataset_time_slice(italian_dataset, mock_csv):
+def test_precomputed_sampling_dataset_time_slice(fp_test_dataset: Path, mock_csv: str) -> None:
     """Test that time_slice correctly slices the CSV."""
     ds = SourceDataPrecomputedSamplingDataset(
-        zarr_path=ZARR_PATH, csv_path=mock_csv, standard_names=["rainfall_flux"], steps=3, time_slice=slice(0, 2)
+        zarr_path=str(fp_test_dataset),
+        csv_path=mock_csv,
+        standard_names=["rainfall_flux"],
+        steps=3,
+        time_slice=slice(0, 2),
     )
     assert len(ds) == 2
 
 
-def test_random_sampling_dataset(italian_dataset):
+def test_random_sampling_dataset(fp_test_dataset: Path) -> None:
     """Test that SourceDataRandomSamplingDataset outputs the correct shape."""
     ds = SourceDataRandomSamplingDataset(
-        zarr_path=ZARR_PATH,
+        zarr_path=str(fp_test_dataset),
         standard_names=["rainfall_flux"],
         steps=5,
         width=32,
@@ -84,10 +88,14 @@ def test_random_sampling_dataset(italian_dataset):
     assert mask.shape == (1, 1, 32, 32)
 
 
-def test_random_sampling_dataset_time_slice(italian_dataset):
+def test_random_sampling_dataset_time_slice(fp_test_dataset: Path) -> None:
     """Test that time_slice correctly slices the Zarr store."""
     ds = SourceDataRandomSamplingDataset(
-        zarr_path=ZARR_PATH, standard_names=["rainfall_flux"], steps=5, time_slice=slice(0, 50), epoch_size=10
+        zarr_path=str(fp_test_dataset),
+        standard_names=["rainfall_flux"],
+        steps=5,
+        time_slice=slice(0, 50),
+        epoch_size=10,
     )
 
     assert ds.max_t == 50  # Since it was sliced to 50

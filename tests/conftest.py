@@ -5,7 +5,13 @@ import xarray as xr
 
 
 @pytest.fixture(scope="session")
-def italian_dataset():
+def fp_test_dataset() -> Path:
+    """Download and cache the Italian DPC dataset, returning the local zarr path.
+
+    Returns the path rather than an open dataset so that each test (and each
+    dataloader worker) can open the store independently, avoiding shared-state
+    issues across processes.
+    """
     cache_path = Path(".pytest_cache/italian_dataset_v0.1.0_100t.zarr")
 
     if not cache_path.exists():
@@ -32,4 +38,4 @@ def italian_dataset():
         ds.to_zarr(cache_path, zarr_format=2)
         print("Download and cache complete.")
 
-    return xr.open_zarr(cache_path)
+    return cache_path
