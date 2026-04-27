@@ -5,18 +5,21 @@ parameter from the command line.
 
 Usage examples::
 
-    # Train with default config:
+    # Train with default config and override dataset path:
     python -m mlcast train \\
-        --config set:data.dataset_factory.zarr_path="'/path/to/data.zarr'" \\
-        --config set:data.dataset_factory.csv_path="'/path/to/sampled.csv'"
+        --config fiddler:use_random_sampler \\
+        --config set:data.dataset_factory.zarr_path="'/path/to/data.zarr'"
 
-    # Override training parameters:
+    # Train from a previously saved YAML config:
+    python -m mlcast train --config /path/to/config.yaml
+
+    # Train from a saved YAML config with additional overrides:
     python -m mlcast train \\
-        --config set:data.dataset_factory.zarr_path="'/path/to/data.zarr'" \\
-        --config set:data.dataset_factory.csv_path="'/path/to/sampled.csv'" \\
-        --config set:data.batch_size=32 \\
-        --config set:pl_module.network.num_blocks=4 \\
+        --config /path/to/config.yaml \\
         --config set:trainer.max_epochs=50
+
+    # Switch to a different base config function entirely:
+    python -m mlcast train --config=config:another_experiment_function
 """
 
 import argparse
@@ -29,7 +32,7 @@ from absl import app, flags
 from fiddle import absl_flags
 
 from . import config  # noqa: F401 — module must be importable for absl_flags
-from .config import train_from_config, training_experiment
+from .config import load_yaml_config, train_from_config, training_experiment
 
 FLAGS = flags.FLAGS
 
@@ -236,7 +239,32 @@ def cli() -> None:
     args, remaining = parser.parse_known_args()
 
     if args.command == "train":
-        has_base_config = False
+        # Check if any --config value is a YAML file path. If so, load it and
+        # seed the _config flag's internal value directly, bypassing Fiddle's
+        # own config: initialisation path. Any remaining --config set:/fiddler:
+        # flags are then applied by Fiddle's flag machinery as normal.
+        yaml_path = None
+        yaml_config_idx = None
+        for i, arg in enumerate(remaining):
+            # Match both `--config path.yaml` and `--config=path.yaml`
+            if arg == "--config" and i + 1 < len(remaining):
+                val = remaining[i + 1]
+                if val.endswith(".yaml") or val.endswith(".yml"):
+                    yaml_path = val
+                    yaml_config_idx = (i, i + 2)  # remove two tokens
+                    break
+            elif arg.startswith("--config="):
+                val = arg[len("--config=") :]
+                if val.endswith(".yaml") or val.endswith(".yml"):
+                    yaml_path = val
+                    yaml_config_idx = (i, i + 1)  # remove one token
+                    break
+
+        if yaml_path is not None:
+            start, end = yaml_config_idx
+            remaining = remaining[:start] + remaining[end:]
+
+        has_base_config = yaml_path is not None
         for i, arg in enumerate(remaining):
             if arg.startswith("--config=config:"):
                 has_base_config = True
@@ -250,6 +278,27 @@ def cli() -> None:
 
         # Auto-quote any unquoted string values intended for Fiddle
         remaining = auto_quote_fiddle_strings(remaining)
+
+        if yaml_path is not None:
+            # Load the YAML config and seed _config's internal state so that
+            # Fiddle's FiddleFlag treats it as if a base config was already
+            # provided via `--config=config:...`. This lets all subsequent
+            # set: and fiddler: directives in `remaining` be applied by
+            # Fiddle's own flag machinery (FiddleFlag.value property) without
+            # any special handling on our part.
+            #
+            # FLAGS['config'] gives us the underlying FiddleFlag instance
+            # (fiddle._src.absl_flags.flags.FiddleFlag), bypassing the
+            # FlagHolder wrapper returned by DEFINE_fiddle_config. We set three
+            # internal attributes to replicate what FiddleFlag._parse_config()
+            # does when handling a `config:` directive:
+            #   - _value: the base fdl.Config object
+            #   - first_command: marks that a base config has been provided
+            #   - _initial_config_expression: the path, used in error messages
+            cfg = load_yaml_config(yaml_path)
+            FLAGS["config"]._value = cfg
+            FLAGS["config"].first_command = "config"
+            FLAGS["config"]._initial_config_expression = yaml_path
 
         app.run(train_main, argv=[sys.argv[0]] + remaining)
 

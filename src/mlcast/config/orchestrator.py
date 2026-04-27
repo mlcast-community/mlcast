@@ -1,5 +1,6 @@
 """High-level configuration orchestrators."""
 
+import re
 from pathlib import Path
 
 import fiddle as fdl
@@ -43,7 +44,14 @@ def train_from_config(cfg: fdl.Config) -> None:
     # Log flattened configuration as hyperparameters if a logger is configured
     if experiment.trainer.logger is not None:
         flat_cfg = fdp.as_dict_flattened(cfg)
-        loggable_cfg = {k: v if isinstance(v, int | float | str | bool) else str(v) for k, v in flat_cfg.items()}
+        # fdp.as_dict_flattened uses bracket notation for list indices
+        # (e.g. "trainer.callbacks[0].monitor"), which MLflow rejects — its
+        # parameter key validator forbids "[" and "]". Replace "[n]" with ".n"
+        # to produce valid, human-readable keys without losing any information.
+        loggable_cfg = {
+            re.sub(r"\[(\d+)\]", r".\1", k): v if isinstance(v, int | float | str | bool) else str(v)
+            for k, v in flat_cfg.items()
+        }
         experiment.trainer.logger.log_hyperparams(loggable_cfg)
         print("Logged flattened Fiddle configuration to trainer.logger")
 
