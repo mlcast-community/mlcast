@@ -1,4 +1,15 @@
-"""Configuration validation constraints and consistency checks."""
+"""Cross-parameter validation constraints for Fiddle configurations.
+
+Consistency checks are predicate functions that raise ``ValueError`` when
+two or more config parameters that must stay in sync have drifted apart.
+Unlike fiddlers (which *mutate* a config to enforce a policy), consistency
+checks are *read-only* — they inspect the config and signal problems early,
+before ``fdl.build()`` is called and before any heavyweight objects are
+instantiated.
+
+Call ``validate_config(cfg)`` explicitly after all fiddlers have been
+applied and before handing the config off to the training orchestrator.
+"""
 
 import fiddle as fdl
 

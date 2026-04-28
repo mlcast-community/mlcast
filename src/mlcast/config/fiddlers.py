@@ -1,4 +1,15 @@
-"""Fiddler mutators for high-level semantic configuration changes."""
+"""Fiddler mutators for high-level semantic configuration changes.
+
+Fiddlers are functions that accept a ``fdl.Config`` and mutate it in place.
+They are the right tool when a change spans multiple config parameters that
+must stay in sync — for example, switching the dataset class while preserving
+its existing parameters, or enabling masking consistently across both the data
+pipeline and the loss function.
+
+Use fiddlers from the CLI via ``--config fiddler:<name>`` or
+``--config "fiddler:<name>(arg=value)"``, or call them directly on a buildable
+config in Python before passing it to ``fdl.build()``.
+"""
 
 import os
 
@@ -100,4 +111,4 @@ def use_mlflow_logger(cfg: fdl.Config) -> None:
             "e.g. export MLFLOW_TRACKING_URI=http://localhost:5000"
         )
     cfg.trainer.logger = fdl.Config(MLFlowLogger, experiment_name=cfg.trainer.logger.name)
-    cfg.trainer.callbacks.append(LogSystemInfoCallback())
+    cfg.trainer.callbacks.append(fdl.Config(LogSystemInfoCallback))

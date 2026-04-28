@@ -1,4 +1,24 @@
-"""Base Fiddle experiment definitions."""
+"""Base Fiddle experiment definitions for ConvGRU radar nowcasting.
+
+This module defines the ``Experiment`` dataclass and the
+``training_experiment`` auto-config factory, which together form the default
+configuration graph for a ConvGRU ensemble nowcasting run.
+
+``training_experiment`` is decorated with ``@auto_config``: calling it returns
+a ``fdl.Config`` graph rather than a live ``Experiment`` object.  Every
+parameter in the graph can be overridden before instantiation — either via
+fiddlers (for semantic, multi-parameter changes) or via ``set:`` overrides on
+the CLI (for single-parameter tweaks).  Call ``fdl.build(cfg)`` to materialise
+the graph into real Python objects.
+
+Typical usage
+-------------
+>>> cfg = training_experiment()          # returns fdl.Config
+>>> use_random_sampler(cfg)              # apply a fiddler
+>>> validate_config(cfg)                 # check cross-parameter contracts
+>>> experiment = fdl.build(cfg)          # instantiate everything
+>>> experiment.run()                     # train + test
+"""
 
 from dataclasses import dataclass
 
@@ -9,7 +29,7 @@ import torch
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from ..data.source_data_module import SourceDataDataModule
+from ..data.source_data_datamodule import SourceDataDataModule
 from ..data.source_datasets import SourceDataPrecomputedSamplingDataset
 from ..models.convgru import ConvGruModel
 from ..nowcasting_module import NowcastLightningModule
