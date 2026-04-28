@@ -32,20 +32,36 @@ def validate_config(cfg: fdl.Config) -> None:
     pl_module = cfg.pl_module
 
     # Contract 1: Network input_channels == len(dataset_factory.standard_names)
+    # Only enforced when the network config exposes input_channels. Networks
+    # using a different parameter name (e.g. HalfUNet uses in_channels) are
+    # skipped — the caller is responsible for keeping those in sync.
     num_vars = len(dataset_factory.standard_names)
-    if network.input_channels != num_vars:
+    try:
+        net_input_channels = network.input_channels
+    except AttributeError:
+        net_input_channels = None
+    if net_input_channels is not None and net_input_channels != num_vars:
         raise ValueError(
-            f"Contract 1 violated: network input_channels ({network.input_channels}) "
+            f"Contract 1 violated: network input_channels ({net_input_channels}) "
             f"must equal the number of standard_names ({num_vars})."
         )
 
     # Contract 2: Dataset width must be divisible by 2 ** network.num_blocks
-    width = getattr(dataset_factory, "width", 256)
-    divisor = 2**network.num_blocks
-    if width % divisor != 0:
-        raise ValueError(
-            f"Contract 2 violated: Dataset width ({width}) must be divisible by 2 ** network.num_blocks ({divisor})."
-        )
+    # Only enforced when the network config exposes num_blocks (e.g. ConvGruModel).
+    # External architectures that do not use a power-of-two downsampling factor
+    # (e.g. HalfUNet) will not have this parameter and are skipped.
+    try:
+        num_blocks = network.num_blocks
+    except AttributeError:
+        num_blocks = None
+    if num_blocks is not None:
+        width = getattr(dataset_factory, "width", 256)
+        divisor = 2**num_blocks
+        if width % divisor != 0:
+            raise ValueError(
+                f"Contract 2 violated: Dataset width ({width}) must be divisible by "
+                f"2 ** network.num_blocks ({divisor})."
+            )
 
     # Contract 3: Dataset steps > forecast_steps
     if dataset_factory.steps <= pl_module.forecast_steps:
