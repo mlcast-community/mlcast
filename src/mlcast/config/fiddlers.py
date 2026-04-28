@@ -11,6 +11,7 @@ Use fiddlers from the CLI via ``--config fiddler:<name>`` or
 config in Python before passing it to ``fdl.build()``.
 """
 
+import inspect
 import os
 
 import fiddle as fdl
@@ -18,11 +19,18 @@ from loguru import logger
 from pytorch_lightning.loggers import MLFlowLogger
 
 from ..callbacks import LogSystemInfoCallback
-from ..data.source_datasets import SourceDataRandomSamplingDataset
+from ..data.source_data_datasets import SourceDataRandomSamplingDataset
 
 
 def set_variables(cfg: fdl.Config, standard_names: list[str]) -> None:
     """Fiddler to synchronize dataset variables with the network's input channels.
+
+    Sets ``dataset_factory.standard_names`` on the data config and, when the
+    network config exposes an ``input_channels`` parameter (e.g.
+    ``ConvGruModel``), keeps it in sync.  Networks that use a different
+    parameter name for the channel count (e.g. ``HalfUNet`` uses
+    ``in_channels``) are left unchanged — callers are responsible for keeping
+    that parameter consistent when swapping in an external architecture.
 
     Parameters
     ----------
@@ -32,7 +40,16 @@ def set_variables(cfg: fdl.Config, standard_names: list[str]) -> None:
         The new list of standard names to load.
     """
     cfg.data.dataset_factory.standard_names = standard_names
-    cfg.pl_module.network.input_channels = len(standard_names)
+    network_cls = cfg.pl_module.network.__fn_or_cls__
+    sig = inspect.signature(network_cls.__init__)
+    if "input_channels" in sig.parameters:
+        cfg.pl_module.network.input_channels = len(standard_names)
+    else:
+        logger.warning(
+            "set_variables: network {} has no 'input_channels' parameter; "
+            "channel count not updated. Set it manually on the network config.",
+            network_cls.__name__,
+        )
 
 
 def toggle_masking(cfg: fdl.Config, enabled: bool) -> None:

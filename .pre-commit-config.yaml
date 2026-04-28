@@ -26,6 +26,14 @@ repos:
   rev: "v2.6.0"
   hooks:
   - id: pyproject-fmt
+- repo: local
+  hooks:
+  - id: config-diagram
+    name: config diagram up to date
+    language: system
+    entry: uv run python docs/generate_base_experiment_config_diagram.py --check
+    files: ^src/mlcast/config/base\.py$
+    pass_filenames: false
 ci:
   autoupdate_schedule: monthly
   autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"

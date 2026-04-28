@@ -30,7 +30,7 @@ from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, Mode
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from ..data.source_data_datamodule import SourceDataDataModule
-from ..data.source_datasets import SourceDataPrecomputedSamplingDataset
+from ..data.source_data_datasets import SourceDataPrecomputedSamplingDataset
 from ..models.convgru import ConvGruModel
 from ..nowcasting_module import NowcastLightningModule
 

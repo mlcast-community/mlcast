@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 import torch
 
-from mlcast.data.source_datasets import (
+from mlcast.data.source_data_datasets import (
     SourceDataPrecomputedSamplingDataset,
     SourceDataRandomSamplingDataset,
 )
