@@ -8,7 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytorch_lightning as pl
-from loguru import logger
+import xarray as xr
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -48,45 +48,25 @@ class SourceDataDataModule(pl.LightningDataModule):
     def setup(self, stage: str | None = None) -> None:
         """Create train, validation, and test datasets.
 
-        Splits are chronological based on the total available time elements
-        determined from a base instance of the dataset.
+        Splits are chronological based on the total number of timesteps in
+        the Zarr store, determined by opening it directly before instantiating
+        any Dataset objects.
         """
-        # Instantiate a base dataset to determine total temporal length
-        base_dataset = self.dataset_factory()
-
-        if hasattr(base_dataset, "coords"):
-            # Precomputed sampling dataset uses coords length
-            n = len(base_dataset.coords)
-        elif hasattr(base_dataset, "ds"):
-            # Random sampling dataset uses the full time dimension of the Zarr store
-            n = base_dataset.ds.time.size
-        else:
-            raise ValueError("Dataset must have 'coords' or 'ds.time' to determine temporal length.")
+        # We need the total number of timesteps to compute split boundaries.
+        # Duck-type the factory to extract zarr_path and storage_options —
+        # functools.partial stores kwargs in .keywords, fdl.Partial exposes
+        # them as attributes.
+        zarr_path = getattr(self.dataset_factory, "zarr_path", None) or self.dataset_factory.keywords["zarr_path"]
+        storage_options = getattr(self.dataset_factory, "storage_options", None) or self.dataset_factory.keywords.get(
+            "storage_options"
+        )
+        n = xr.open_zarr(zarr_path, storage_options=storage_options).sizes["time"]
 
         train_end = int(n * self.train_ratio)
-        val_end = int(n * (self.train_ratio + self.val_ratio))
-
-        min_steps = getattr(base_dataset, "steps", 1)
-
-        train_steps = train_end
-        val_steps = val_end - train_end
-        test_steps = n - val_end
-
-        if train_steps < min_steps and self.train_ratio > 0:
-            logger.warning(
-                f"Training split has only {train_steps} time steps, "
-                f"but model sequence requires {min_steps}. Training may crash or skip this split."
-            )
-        if val_steps < min_steps and self.val_ratio > 0:
-            logger.warning(
-                f"Validation split has only {val_steps} time steps, "
-                f"but model sequence requires {min_steps}. Validation may crash or skip this split."
-            )
-        if test_steps < min_steps and (1 - self.train_ratio - self.val_ratio) > 1e-5:
-            logger.warning(
-                f"Test split has only {test_steps} time steps, "
-                f"but model sequence requires {min_steps}. Testing may crash or skip this split."
-            )
+        # Compute val_end independently from train_end rather than from the
+        # accumulated sum of ratios, to avoid floating-point truncation errors
+        # (e.g. int(240 * (0.5 + 1/3)) = int(199.999...) = 199 instead of 200).
+        val_end = train_end + int(n * self.val_ratio)
 
         self.train_dataset = self.dataset_factory(
             time_slice=slice(0, train_end),

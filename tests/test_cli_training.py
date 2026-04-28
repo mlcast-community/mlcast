@@ -5,6 +5,7 @@ from pathlib import Path
 from fiddle._src.experimental.yaml_serialization import dump_yaml
 
 from mlcast.config import training_experiment
+from mlcast.config.fiddlers import use_random_sampler
 
 
 def test_cli_train_command(fp_test_dataset: Path, tmp_path: Path) -> None:
@@ -56,7 +57,12 @@ def test_cli_train_from_yaml_config(fp_test_dataset: Path, tmp_path: Path) -> No
     additional --config flags. This exercises the pure load-from-YAML path.
     """
     cfg = training_experiment.as_buildable()
+    # Switch to random sampler (no CSV required) and use the correct variable name
+    use_random_sampler(cfg)
+    cfg.data.dataset_factory.standard_names = ["rainfall_flux"]
     cfg.data.dataset_factory.zarr_path = str(fp_test_dataset.absolute())
+    cfg.data.train_ratio = 0.4
+    cfg.data.val_ratio = 0.3  # test ratio becomes 0.3 (30 steps > 18 required)
     cfg.trainer.fast_dev_run = True
     cfg.data.batch_size = 1
     cfg.data.num_workers = 0
