@@ -1,0 +1,93 @@
+!fdl.Config
+__fn_or_cls__:
+  module: mlcast.config.base
+  name: Experiment
+data: !fdl.Config
+  __fn_or_cls__:
+    module: mlcast.data.source_data_datamodule
+    name: SourceDataDataModule
+  batch_size: 16
+  dataset_factory: !fdl.Partial
+    __fn_or_cls__:
+      module: mlcast.data.source_data_datasets
+      name: SourceDataPrecomputedSamplingDataset
+    csv_path: ./data/sampled_datacubes.csv
+    deterministic: false
+    forecast_steps: 12
+    return_mask: true
+    standard_names:
+    - rainfall_rate
+    steps: 18
+    zarr_path: ./data/radar.zarr
+  num_workers: 8
+  pin_memory: true
+  train_ratio: 0.7
+  val_ratio: 0.15
+pl_module: !fdl.Config
+  __fn_or_cls__:
+    module: mlcast.nowcasting_module
+    name: NowcastLightningModule
+  ensemble_size: 2
+  loss_class: crps
+  loss_params:
+    temporal_lambda: 0.01
+  lr_scheduler: !fdl.Partial
+    __fn_or_cls__:
+      module: torch.optim.lr_scheduler
+      name: ReduceLROnPlateau
+    factor: 0.5
+    mode: min
+    patience: 10
+  masked_loss: true
+  network: !fdl.Config
+    __fn_or_cls__:
+      module: mlcast.models.convgru
+      name: ConvGruModel
+    input_channels: 1
+    noisy_decoder: false
+    num_blocks: 5
+  optimizer: !fdl.Partial
+    __fn_or_cls__:
+      module: torch.optim.adam
+      name: Adam
+    fused: true
+    lr: 0.0001
+trainer: !fdl.Config
+  __fn_or_cls__:
+    module: pytorch_lightning.trainer.trainer
+    name: Trainer
+  accelerator: auto
+  callbacks:
+  - !fdl.Config
+    __fn_or_cls__:
+      module: pytorch_lightning.callbacks.model_checkpoint
+      name: ModelCheckpoint
+    mode: min
+    monitor: val_loss
+    save_top_k: 1
+  - !fdl.Config
+    __fn_or_cls__:
+      module: pytorch_lightning.callbacks.model_checkpoint
+      name: ModelCheckpoint
+    mode: min
+    monitor: train_loss_epoch
+    save_top_k: 1
+  - !fdl.Config
+    __fn_or_cls__:
+      module: pytorch_lightning.callbacks.early_stopping
+      name: EarlyStopping
+    mode: min
+    monitor: val_loss
+    patience: 100
+  - !fdl.Config
+    __fn_or_cls__:
+      module: pytorch_lightning.callbacks.lr_monitor
+      name: LearningRateMonitor
+    logging_interval: step
+  logger: !fdl.Config
+    __fn_or_cls__:
+      module: pytorch_lightning.loggers.tensorboard
+      name: TensorBoardLogger
+    name: mlcast
+    save_dir: logs
+  max_epochs: 100
