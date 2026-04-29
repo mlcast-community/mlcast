@@ -63,24 +63,17 @@ def validate_config(cfg: fdl.Config) -> None:
                 f"2 ** network.num_blocks ({divisor})."
             )
 
-    # Contract 3: Dataset steps > forecast_steps
-    if dataset_factory.steps <= pl_module.forecast_steps:
-        raise ValueError(
-            f"Contract 3 violated: Dataset steps ({dataset_factory.steps}) "
-            f"must be greater than forecast_steps ({pl_module.forecast_steps})."
-        )
-
-    # Contract 4: Ensemble models require CRPS or AFCRPS
+    # Contract 3: Ensemble models require CRPS or AFCRPS
     if pl_module.ensemble_size > 1:
         if str(pl_module.loss_class).lower() not in ["crps", "afcrps"]:
             raise ValueError(
-                f"Contract 4 violated: Ensemble models (ensemble_size={pl_module.ensemble_size}) "
+                f"Contract 3 violated: Ensemble models (ensemble_size={pl_module.ensemble_size}) "
                 f"require 'crps' or 'afcrps' loss, got '{pl_module.loss_class}'."
             )
 
-    # Contract 5: Dataset return_mask must match model masked_loss
+    # Contract 4: Dataset return_mask must match model masked_loss
     if bool(dataset_factory.return_mask) != bool(pl_module.masked_loss):
         raise ValueError(
-            f"Contract 5 violated: dataset_factory.return_mask ({dataset_factory.return_mask}) "
+            f"Contract 4 violated: dataset_factory.return_mask ({dataset_factory.return_mask}) "
             f"must match pl_module.masked_loss ({pl_module.masked_loss})."
         )

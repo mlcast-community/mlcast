@@ -68,6 +68,7 @@ def training_experiment() -> Experiment:
         csv_path="./data/sampled_datacubes.csv",
         standard_names=["rainfall_rate"],
         steps=18,
+        forecast_steps=12,
         return_mask=True,
         deterministic=False,
     )
@@ -89,7 +90,6 @@ def training_experiment() -> Experiment:
 
     pl_module = NowcastLightningModule(
         network=network,
-        forecast_steps=12,
         ensemble_size=2,
         loss_class="crps",
         loss_params={"temporal_lambda": 0.01},

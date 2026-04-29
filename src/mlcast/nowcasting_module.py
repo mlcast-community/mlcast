@@ -32,8 +32,6 @@ class NowcastLightningModule(pl.LightningModule):
         The PyTorch network architecture to train.
     ensemble_size : int, optional
         Number of ensemble members to generate. Default is ``1``.
-    forecast_steps : int or None, optional
-        Number of future timesteps to forecast. Default is ``None``.
     loss_class : type[torch.nn.Module] or str, optional
         Loss function class or its string name. Default is ``"mse"``.
     loss_params : dict or None, optional
@@ -52,7 +50,6 @@ class NowcastLightningModule(pl.LightningModule):
         self,
         network: torch.nn.Module,
         ensemble_size: int = 1,
-        forecast_steps: type | int | None = None,
         loss_class: type[torch.nn.Module] | str = "mse",
         loss_params: dict[str, Any] | None = None,
         masked_loss: bool = False,
@@ -61,7 +58,7 @@ class NowcastLightningModule(pl.LightningModule):
     ) -> None:
         super().__init__()
         # Explicitly save hyperparameters that are accessed later via self.hparams
-        self.save_hyperparameters("ensemble_size", "forecast_steps", "loss_class", "loss_params", "masked_loss")
+        self.save_hyperparameters("ensemble_size", "loss_class", "loss_params", "masked_loss")
 
         self.network = network
         self.optimizer_factory = optimizer
@@ -122,16 +119,14 @@ class NowcastLightningModule(pl.LightningModule):
         loss : torch.Tensor
             The computed loss for the batch.
         """
-        data = batch["data"]
-        past = data[:, : -self.hparams["forecast_steps"]]
-        future = data[:, -self.hparams["forecast_steps"] :]
+        past = batch["input"]
+        future = batch["target"]
+        forecast_steps = future.shape[1]
 
-        preds = self(past, forecast_steps=self.hparams["forecast_steps"], ensemble_size=ensemble_size).clamp(
-            min=-1, max=1
-        )
+        preds = self(past, forecast_steps=forecast_steps, ensemble_size=ensemble_size).clamp(min=-1, max=1)
 
         if self.hparams["masked_loss"]:
-            mask = batch["mask"][:, -self.hparams["forecast_steps"] :]
+            mask = batch["target_mask"]
             loss = self.criterion(preds, future, mask)
         else:
             loss = self.criterion(preds, future)

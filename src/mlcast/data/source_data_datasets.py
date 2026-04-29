@@ -5,7 +5,7 @@ Provides pre-computed sampling and (soon) random sampling datasets.
 
 import time
 import warnings
-from typing import Any
+from typing import Any, TypedDict
 
 import cf_xarray  # noqa: F401
 import numpy as np
@@ -13,10 +13,29 @@ import pandas as pd
 import torch
 import xarray as xr
 from beartype import beartype
-from jaxtyping import jaxtyped
+from jaxtyping import Float, jaxtyped
 from torch.utils.data import Dataset
 
 from mlcast.data.normalization import NORMALIZATION_REGISTRY
+
+
+class DatasetSample(TypedDict, total=False):
+    """Typed dictionary returned by dataset ``__getitem__``.
+
+    Keys
+    ----
+    input : Float[torch.Tensor, "input_steps channels height width"]
+        Past frames fed to the network as input.
+    target : Float[torch.Tensor, "forecast_steps channels height width"]
+        Future frames the network should predict.
+    target_mask : Float[torch.Tensor, "forecast_steps channels height width"]
+        Per-timestep, per-channel validity mask for the target (1 = valid,
+        0 = NaN in original data). Only present when ``return_mask=True``.
+    """
+
+    input: Float[torch.Tensor, "input_steps channels height width"]
+    target: Float[torch.Tensor, "forecast_steps channels height width"]
+    target_mask: Float[torch.Tensor, "forecast_steps channels height width"]
 
 
 class SourceDataPrecomputedSamplingDataset(Dataset):
@@ -36,9 +55,14 @@ class SourceDataPrecomputedSamplingDataset(Dataset):
     standard_names : list of str
         List of CF standard names of variables to load (e.g., ``["rainfall_rate"]``).
     steps : int
-        Number of timesteps to extract per sample.
+        Number of timesteps to extract per sample (``input_steps + forecast_steps``).
+    forecast_steps : int
+        Number of timesteps to use as the forecast target.  Must be less than
+        ``steps``.  The remaining ``steps - forecast_steps`` timesteps form the
+        input.
     return_mask : bool, optional
-        If ``True``, also return a spatial NaN mask. Default is ``False``.
+        If ``True``, also return a per-timestep validity mask for the target.
+        Default is ``False``.
     deterministic : bool, optional
         If ``True``, use a fixed random seed (42) for reproducibility. Default is ``False``.
     augment : bool, optional
@@ -59,6 +83,7 @@ class SourceDataPrecomputedSamplingDataset(Dataset):
         csv_path: str,
         standard_names: list[str],
         steps: int,
+        forecast_steps: int,
         return_mask: bool = False,
         deterministic: bool = False,
         augment: bool = False,
@@ -68,6 +93,8 @@ class SourceDataPrecomputedSamplingDataset(Dataset):
         time_depth: int = 24,
         storage_options: dict[str, Any] | None = None,
     ) -> None:
+        if forecast_steps >= steps:
+            raise ValueError(f"forecast_steps ({forecast_steps}) must be less than steps ({steps}).")
         self.coords = pd.read_csv(csv_path).sort_values("t")
         if time_slice is not None:
             self.coords = self.coords.iloc[time_slice].reset_index(drop=True)
@@ -111,6 +138,7 @@ class SourceDataPrecomputedSamplingDataset(Dataset):
         self.h = height
         self.dt = time_depth
         self.steps = steps
+        self.forecast_steps = forecast_steps
 
         da_first_var = self.ds.cf[self.standard_names[0]]
         self.t_dim = da_first_var.cf["time"].dims[0]
@@ -190,15 +218,18 @@ class SourceDataPrecomputedSamplingDataset(Dataset):
         return tensors[0] if len(tensors) == 1 else tensors
 
     @jaxtyped(typechecker=beartype)
-    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+    def __getitem__(self, idx: int) -> DatasetSample:
         """Load and return a single crop sample.
 
         Returns
         -------
-        sample : dict of str to torch.Tensor
-            Dictionary with key ``'data'`` containing a tensor of shape
-            ``(T, C, H, W)``. If ``return_mask`` is ``True``, also contains
-            ``'mask'`` of shape ``(1, 1, H, W)``.
+        sample : DatasetSample
+            Dictionary with keys ``'input'`` of shape
+            ``(input_steps, C, H, W)`` and ``'target'`` of shape
+            ``(forecast_steps, C, H, W)``.  If ``return_mask`` is ``True``,
+            also contains ``'target_mask'`` of shape
+            ``(forecast_steps, C, H, W)`` with 1 where the original data was
+            valid and 0 where it was NaN.
         """
         t0, x0, y0 = self.coords.iloc[idx]
 
@@ -212,7 +243,6 @@ class SourceDataPrecomputedSamplingDataset(Dataset):
         t_slice = slice(int(t_start), int(t_start) + self.steps)
 
         channels = []
-        masks = []
         for std_name in self.standard_names:
             da_var = self.ds.cf[std_name].isel({self.t_dim: t_slice, self.x_dim: x_slice, self.y_dim: y_slice})
             var_data = da_var.values
@@ -221,31 +251,33 @@ class SourceDataPrecomputedSamplingDataset(Dataset):
             norm_data = norm_func(var_data)
             channels.append(norm_data)
 
-            if self.return_mask:
-                masks.append((~(np.isnan(norm_data).any(axis=0, keepdims=True))).astype(np.float32))
-
         # Stack along channel dimension: (C, T, H, W) -> (T, C, H, W)
         data = np.stack(channels, axis=0)
         data = np.swapaxes(data, 0, 1)
+
+        # Compute target mask before nan_to_num, from target timesteps only
+        if self.return_mask:
+            target_mask = (~np.isnan(data[-self.forecast_steps :])).astype(np.float32)
+            target_mask_t = torch.from_numpy(target_mask)
+
         data = np.nan_to_num(data, nan=-1.0)
         data_t = torch.from_numpy(data)
 
-        if self.return_mask:
-            # Combine masks across channels: valid only if all channels are valid
-            mask = np.stack(masks, axis=0).min(axis=0)  # shape (1, H, W)
-            mask_t = torch.from_numpy(mask[np.newaxis, ...])  # shape (1, 1, H, W)
+        input_t = data_t[: -self.forecast_steps]
+        target_t = data_t[-self.forecast_steps :]
 
+        if self.return_mask:
             if self.augment:
-                augmented = self._apply_augmentations(data_t, mask_t)
+                augmented = self._apply_augmentations(input_t, target_t, target_mask_t)
                 assert isinstance(augmented, tuple)
-                data_t, mask_t = augmented
-            return {"data": data_t, "mask": mask_t}
+                input_t, target_t, target_mask_t = augmented
+            return DatasetSample(input=input_t, target=target_t, target_mask=target_mask_t)
         else:
             if self.augment:
-                augmented = self._apply_augmentations(data_t)
-                assert isinstance(augmented, torch.Tensor)
-                data_t = augmented
-            return {"data": data_t}
+                augmented = self._apply_augmentations(input_t, target_t)
+                assert isinstance(augmented, tuple)
+                input_t, target_t = augmented
+            return DatasetSample(input=input_t, target=target_t)
 
 
 class SourceDataRandomSamplingDataset(Dataset):
@@ -262,9 +294,14 @@ class SourceDataRandomSamplingDataset(Dataset):
     standard_names : list of str
         List of CF standard names of variables to load (e.g., ``["rainfall_rate"]``).
     steps : int
-        Number of timesteps to extract per sample.
+        Number of timesteps to extract per sample (``input_steps + forecast_steps``).
+    forecast_steps : int
+        Number of timesteps to use as the forecast target.  Must be less than
+        ``steps``.  The remaining ``steps - forecast_steps`` timesteps form the
+        input.
     return_mask : bool, optional
-        If ``True``, also return a spatial NaN mask. Default is ``False``.
+        If ``True``, also return a per-timestep validity mask for the target.
+        Default is ``False``.
     deterministic : bool, optional
         If ``True``, use a fixed random seed (42) for reproducibility. Default is ``False``.
     augment : bool, optional
@@ -286,6 +323,7 @@ class SourceDataRandomSamplingDataset(Dataset):
         zarr_path: str,
         standard_names: list[str],
         steps: int,
+        forecast_steps: int,
         return_mask: bool = False,
         deterministic: bool = False,
         augment: bool = False,
@@ -296,6 +334,8 @@ class SourceDataRandomSamplingDataset(Dataset):
         storage_options: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
+        if forecast_steps >= steps:
+            raise ValueError(f"forecast_steps ({forecast_steps}) must be less than steps ({steps}).")
         self.storage_options = storage_options
         self._zarr_path = zarr_path
         self._time_slice = time_slice
@@ -335,6 +375,7 @@ class SourceDataRandomSamplingDataset(Dataset):
         self.h = height
         self.steps = steps
         self.epoch_size = epoch_size
+        self.forecast_steps = forecast_steps
 
         da_first_var = self.ds.cf[self.standard_names[0]]
         self.t_dim = da_first_var.cf["time"].dims[0]
@@ -422,15 +463,18 @@ class SourceDataRandomSamplingDataset(Dataset):
         return tensors[0] if len(tensors) == 1 else tensors
 
     @jaxtyped(typechecker=beartype)
-    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+    def __getitem__(self, idx: int) -> DatasetSample:
         """Load and return a single randomly sampled datacube.
 
         Returns
         -------
-        sample : dict of str to torch.Tensor
-            Dictionary with key ``'data'`` containing a tensor of shape
-            ``(T, C, H, W)``. If ``return_mask`` is ``True``, also contains
-            ``'mask'`` of shape ``(1, 1, H, W)``.
+        sample : DatasetSample
+            Dictionary with keys ``'input'`` of shape
+            ``(input_steps, C, H, W)`` and ``'target'`` of shape
+            ``(forecast_steps, C, H, W)``.  If ``return_mask`` is ``True``,
+            also contains ``'target_mask'`` of shape
+            ``(forecast_steps, C, H, W)`` with 1 where the original data was
+            valid and 0 where it was NaN.
         """
         t_start = self.rng.integers(0, self.max_t - self.steps + 1)
         y_start = self.rng.integers(0, self.max_y - self.h + 1)
@@ -441,7 +485,6 @@ class SourceDataRandomSamplingDataset(Dataset):
         x_slice = slice(int(x_start), int(x_start) + self.w)
 
         channels = []
-        masks = []
         for std_name in self.standard_names:
             da_var = self.ds.cf[std_name].isel({self.t_dim: t_slice, self.x_dim: x_slice, self.y_dim: y_slice})
             var_data = da_var.values
@@ -450,28 +493,30 @@ class SourceDataRandomSamplingDataset(Dataset):
             norm_data = norm_func(var_data)
             channels.append(norm_data)
 
-            if self.return_mask:
-                masks.append((~(np.isnan(norm_data).any(axis=0, keepdims=True))).astype(np.float32))
-
         # Stack along channel dimension: (C, T, H, W) -> (T, C, H, W)
         data = np.stack(channels, axis=0)
         data = np.swapaxes(data, 0, 1)
+
+        # Compute target mask before nan_to_num, from target timesteps only
+        if self.return_mask:
+            target_mask = (~np.isnan(data[-self.forecast_steps :])).astype(np.float32)
+            target_mask_t = torch.from_numpy(target_mask)
+
         data = np.nan_to_num(data, nan=-1.0)
         data_t = torch.from_numpy(data)
 
-        if self.return_mask:
-            # Combine masks across channels: valid only if all channels are valid
-            mask = np.stack(masks, axis=0).min(axis=0)  # shape (1, H, W)
-            mask_t = torch.from_numpy(mask[np.newaxis, ...])  # shape (1, 1, H, W)
+        input_t = data_t[: -self.forecast_steps]
+        target_t = data_t[-self.forecast_steps :]
 
+        if self.return_mask:
             if self.augment:
-                augmented = self._apply_augmentations(data_t, mask_t)
+                augmented = self._apply_augmentations(input_t, target_t, target_mask_t)
                 assert isinstance(augmented, tuple)
-                data_t, mask_t = augmented
-            return {"data": data_t, "mask": mask_t}
+                input_t, target_t, target_mask_t = augmented
+            return DatasetSample(input=input_t, target=target_t, target_mask=target_mask_t)
         else:
             if self.augment:
-                augmented = self._apply_augmentations(data_t)
-                assert isinstance(augmented, torch.Tensor)
-                data_t = augmented
-            return {"data": data_t}
+                augmented = self._apply_augmentations(input_t, target_t)
+                assert isinstance(augmented, tuple)
+                input_t, target_t = augmented
+            return DatasetSample(input=input_t, target=target_t)

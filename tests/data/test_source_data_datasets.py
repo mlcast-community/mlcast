@@ -27,11 +27,14 @@ def mock_csv(tmp_path: Path) -> str:
 
 def test_precomputed_sampling_dataset(fp_test_dataset: Path, mock_csv: str) -> None:
     """Test that SourceDataPrecomputedSamplingDataset outputs the correct shape."""
+    steps = 3
+    forecast_steps = 1
     ds = SourceDataPrecomputedSamplingDataset(
         zarr_path=str(fp_test_dataset),
         csv_path=mock_csv,
         standard_names=["rainfall_flux"],
-        steps=3,
+        steps=steps,
+        forecast_steps=forecast_steps,
         width=16,
         height=16,
         return_mask=True,
@@ -40,17 +43,20 @@ def test_precomputed_sampling_dataset(fp_test_dataset: Path, mock_csv: str) -> N
     assert len(ds) == 3
     sample = ds[0]
 
-    assert "data" in sample
-    assert "mask" in sample
+    assert "input" in sample
+    assert "target" in sample
+    assert "target_mask" in sample
 
-    data = sample["data"]
-    mask = sample["mask"]
+    input_t = sample["input"]
+    target_t = sample["target"]
+    target_mask_t = sample["target_mask"]
 
-    # Expected shape: (T, C, H, W) -> (3, 1, 16, 16)
-    assert data.shape == (3, 1, 16, 16)
-    assert mask.shape == (1, 1, 16, 16)
-    assert isinstance(data, torch.Tensor)
-    assert isinstance(mask, torch.Tensor)
+    assert input_t.shape == (steps - forecast_steps, 1, 16, 16)
+    assert target_t.shape == (forecast_steps, 1, 16, 16)
+    assert target_mask_t.shape == (forecast_steps, 1, 16, 16)
+    assert isinstance(input_t, torch.Tensor)
+    assert isinstance(target_t, torch.Tensor)
+    assert isinstance(target_mask_t, torch.Tensor)
 
 
 def test_precomputed_sampling_dataset_time_slice(fp_test_dataset: Path, mock_csv: str) -> None:
@@ -60,17 +66,33 @@ def test_precomputed_sampling_dataset_time_slice(fp_test_dataset: Path, mock_csv
         csv_path=mock_csv,
         standard_names=["rainfall_flux"],
         steps=3,
+        forecast_steps=1,
         time_slice=slice(0, 2),
     )
     assert len(ds) == 2
 
 
+def test_precomputed_sampling_dataset_forecast_steps_guard(fp_test_dataset: Path, mock_csv: str) -> None:
+    """Test that forecast_steps >= steps raises ValueError."""
+    with pytest.raises(ValueError, match="forecast_steps"):
+        SourceDataPrecomputedSamplingDataset(
+            zarr_path=str(fp_test_dataset),
+            csv_path=mock_csv,
+            standard_names=["rainfall_flux"],
+            steps=3,
+            forecast_steps=3,
+        )
+
+
 def test_random_sampling_dataset(fp_test_dataset: Path) -> None:
     """Test that SourceDataRandomSamplingDataset outputs the correct shape."""
+    steps = 5
+    forecast_steps = 2
     ds = SourceDataRandomSamplingDataset(
         zarr_path=str(fp_test_dataset),
         standard_names=["rainfall_flux"],
-        steps=5,
+        steps=steps,
+        forecast_steps=forecast_steps,
         width=32,
         height=32,
         epoch_size=10,
@@ -80,12 +102,17 @@ def test_random_sampling_dataset(fp_test_dataset: Path) -> None:
     assert len(ds) == 10
     sample = ds[0]
 
-    data = sample["data"]
-    mask = sample["mask"]
+    assert "input" in sample
+    assert "target" in sample
+    assert "target_mask" in sample
 
-    # Expected shape: (T, C, H, W) -> (5, 1, 32, 32)
-    assert data.shape == (5, 1, 32, 32)
-    assert mask.shape == (1, 1, 32, 32)
+    input_t = sample["input"]
+    target_t = sample["target"]
+    target_mask_t = sample["target_mask"]
+
+    assert input_t.shape == (steps - forecast_steps, 1, 32, 32)
+    assert target_t.shape == (forecast_steps, 1, 32, 32)
+    assert target_mask_t.shape == (forecast_steps, 1, 32, 32)
 
 
 def test_random_sampling_dataset_time_slice(fp_test_dataset: Path) -> None:
@@ -94,9 +121,21 @@ def test_random_sampling_dataset_time_slice(fp_test_dataset: Path) -> None:
         zarr_path=str(fp_test_dataset),
         standard_names=["rainfall_flux"],
         steps=5,
+        forecast_steps=2,
         time_slice=slice(0, 50),
         epoch_size=10,
     )
 
     assert ds.max_t == 50  # Since it was sliced to 50
     assert len(ds) == 10
+
+
+def test_random_sampling_dataset_forecast_steps_guard(fp_test_dataset: Path) -> None:
+    """Test that forecast_steps >= steps raises ValueError."""
+    with pytest.raises(ValueError, match="forecast_steps"):
+        SourceDataRandomSamplingDataset(
+            zarr_path=str(fp_test_dataset),
+            standard_names=["rainfall_flux"],
+            steps=5,
+            forecast_steps=5,
+        )

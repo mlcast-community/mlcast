@@ -180,7 +180,7 @@ U-Net) to satisfy the interface.  The wrapper channel-stacks the past frames
 and runs the U-Net autoregressively for each requested forecast step:
 
 > **Note** — `past_steps` is not a top-level config parameter; it equals
-> `dataset_factory.steps - pl_module.forecast_steps` (18 − 12 = 6 by
+> `dataset_factory.steps - dataset_factory.forecast_steps` (18 − 12 = 6 by
 > default).  You must read it from the config before building the network
 > node, as shown below.
 
@@ -226,7 +226,7 @@ class HalfUNetNowcaster(nn.Module):
 cfg = training_experiment.as_buildable()
 use_random_sampler(cfg)
 
-past_steps = cfg.data.dataset_factory.steps - cfg.pl_module.forecast_steps
+past_steps = cfg.data.dataset_factory.steps - cfg.data.dataset_factory.forecast_steps
 cfg.pl_module.network = fdl.Config(
     HalfUNetNowcaster,
     in_channels=past_steps * 1,  # 1 variable (rainfall_flux)
@@ -324,7 +324,7 @@ concatenated along the channel dimension.
 
 `past_steps` is derived at runtime from the data config:
 ```
-past_steps = dataset_factory.steps - pl_module.forecast_steps
+past_steps = dataset_factory.steps - dataset_factory.forecast_steps
            = 18 - 12 = 6  (defaults)
 ```
 
