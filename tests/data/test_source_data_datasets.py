@@ -27,13 +27,13 @@ def mock_csv(tmp_path: Path) -> str:
 
 def test_precomputed_sampling_dataset(fp_test_dataset: Path, mock_csv: str) -> None:
     """Test that SourceDataPrecomputedSamplingDataset outputs the correct shape."""
-    steps = 3
+    input_steps = 2
     forecast_steps = 1
     ds = SourceDataPrecomputedSamplingDataset(
         zarr_path=str(fp_test_dataset),
         csv_path=mock_csv,
         standard_names=["rainfall_flux"],
-        steps=steps,
+        input_steps=input_steps,
         forecast_steps=forecast_steps,
         width=16,
         height=16,
@@ -51,7 +51,7 @@ def test_precomputed_sampling_dataset(fp_test_dataset: Path, mock_csv: str) -> N
     target_t = sample["target"]
     target_mask_t = sample["target_mask"]
 
-    assert input_t.shape == (steps - forecast_steps, 1, 16, 16)
+    assert input_t.shape == (input_steps, 1, 16, 16)
     assert target_t.shape == (forecast_steps, 1, 16, 16)
     assert target_mask_t.shape == (forecast_steps, 1, 16, 16)
     assert isinstance(input_t, torch.Tensor)
@@ -65,7 +65,7 @@ def test_precomputed_sampling_dataset_time_slice(fp_test_dataset: Path, mock_csv
         zarr_path=str(fp_test_dataset),
         csv_path=mock_csv,
         standard_names=["rainfall_flux"],
-        steps=3,
+        input_steps=2,
         forecast_steps=1,
         time_slice=slice(0, 2),
     )
@@ -73,25 +73,25 @@ def test_precomputed_sampling_dataset_time_slice(fp_test_dataset: Path, mock_csv
 
 
 def test_precomputed_sampling_dataset_forecast_steps_guard(fp_test_dataset: Path, mock_csv: str) -> None:
-    """Test that forecast_steps >= steps raises ValueError."""
-    with pytest.raises(ValueError, match="forecast_steps"):
+    """Test that instantiation with input_steps=0 raises ValueError."""
+    with pytest.raises(ValueError, match="input_steps"):
         SourceDataPrecomputedSamplingDataset(
             zarr_path=str(fp_test_dataset),
             csv_path=mock_csv,
             standard_names=["rainfall_flux"],
-            steps=3,
+            input_steps=0,
             forecast_steps=3,
         )
 
 
 def test_random_sampling_dataset(fp_test_dataset: Path) -> None:
     """Test that SourceDataRandomSamplingDataset outputs the correct shape."""
-    steps = 5
+    input_steps = 3
     forecast_steps = 2
     ds = SourceDataRandomSamplingDataset(
         zarr_path=str(fp_test_dataset),
         standard_names=["rainfall_flux"],
-        steps=steps,
+        input_steps=input_steps,
         forecast_steps=forecast_steps,
         width=32,
         height=32,
@@ -110,7 +110,7 @@ def test_random_sampling_dataset(fp_test_dataset: Path) -> None:
     target_t = sample["target"]
     target_mask_t = sample["target_mask"]
 
-    assert input_t.shape == (steps - forecast_steps, 1, 32, 32)
+    assert input_t.shape == (input_steps, 1, 32, 32)
     assert target_t.shape == (forecast_steps, 1, 32, 32)
     assert target_mask_t.shape == (forecast_steps, 1, 32, 32)
 
@@ -120,7 +120,7 @@ def test_random_sampling_dataset_time_slice(fp_test_dataset: Path) -> None:
     ds = SourceDataRandomSamplingDataset(
         zarr_path=str(fp_test_dataset),
         standard_names=["rainfall_flux"],
-        steps=5,
+        input_steps=3,
         forecast_steps=2,
         time_slice=slice(0, 50),
         epoch_size=10,
@@ -131,11 +131,11 @@ def test_random_sampling_dataset_time_slice(fp_test_dataset: Path) -> None:
 
 
 def test_random_sampling_dataset_forecast_steps_guard(fp_test_dataset: Path) -> None:
-    """Test that forecast_steps >= steps raises ValueError."""
-    with pytest.raises(ValueError, match="forecast_steps"):
+    """Test that instantiation with input_steps=0 raises ValueError."""
+    with pytest.raises(ValueError, match="input_steps"):
         SourceDataRandomSamplingDataset(
             zarr_path=str(fp_test_dataset),
             standard_names=["rainfall_flux"],
-            steps=5,
+            input_steps=0,
             forecast_steps=5,
         )

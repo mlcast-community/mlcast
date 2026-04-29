@@ -79,7 +79,7 @@ def use_random_sampler(cfg: fdl.Config) -> None:
         SourceDataRandomSamplingDataset,
         zarr_path=cfg.data.dataset_factory.zarr_path,
         standard_names=cfg.data.dataset_factory.standard_names,
-        steps=cfg.data.dataset_factory.steps,
+        input_steps=cfg.data.dataset_factory.input_steps,
         forecast_steps=cfg.data.dataset_factory.forecast_steps,
         return_mask=cfg.data.dataset_factory.return_mask,
         storage_options=getattr(cfg.data.dataset_factory, "storage_options", None),

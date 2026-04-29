@@ -49,12 +49,12 @@ def test_contract_4_masking_sync() -> None:
 
 
 def test_dataset_forecast_steps_guard() -> None:
-    """Verify that dataset raises ValueError when forecast_steps >= steps."""
-    with pytest.raises(ValueError, match="forecast_steps"):
+    """Verify that dataset raises ValueError when input_steps=0."""
+    with pytest.raises(ValueError, match="input_steps"):
         SourceDataPrecomputedSamplingDataset(
             zarr_path="dummy.zarr",
             csv_path="dummy.csv",
             standard_names=["rainfall_rate"],
-            steps=5,
+            input_steps=0,
             forecast_steps=5,
         )

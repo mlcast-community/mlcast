@@ -67,7 +67,7 @@ def training_experiment() -> Experiment:
         zarr_path="./data/radar.zarr",
         csv_path="./data/sampled_datacubes.csv",
         standard_names=["rainfall_rate"],
-        steps=18,
+        input_steps=6,
         forecast_steps=12,
         return_mask=True,
         deterministic=False,

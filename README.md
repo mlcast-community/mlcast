@@ -179,12 +179,11 @@ As an example, here is how to wrap an
 U-Net) to satisfy the interface.  The wrapper channel-stacks the past frames
 and runs the U-Net autoregressively for each requested forecast step:
 
-> **Note** — `past_steps` is not a top-level config parameter; it equals
-> `dataset_factory.steps - dataset_factory.forecast_steps` (18 − 12 = 6 by
-> default).  You must read it from the config before building the network
-> node, as shown below.
+> **Note** — `input_steps` equals `dataset_factory.input_steps` (6 by
+> default) and is directly readable from the config graph before building.
 
 ```python
+import einops
 import fiddle as fdl
 import torch
 import torch.nn as nn
@@ -197,40 +196,40 @@ from mlcast.config.fiddlers import use_random_sampler
 # NowcastLightningModule calls network(x, steps=N, ensemble_size=M), so any
 # custom network must accept those keyword arguments.
 class HalfUNetNowcaster(nn.Module):
-    def __init__(self, in_channels: int = 6, out_channels: int = 1):
+    def __init__(self, input_steps: int = 6, num_vars: int = 1):
         super().__init__()
         self.unet = HalfUNet(
             input_shape=(256, 256),
-            in_channels=in_channels,
-            out_channels=out_channels,
+            in_channels=input_steps * num_vars,
+            out_channels=num_vars,
             settings=fdl.Config(HalfUNet.settings_kls),
         )
+        self.num_vars = num_vars
 
     def forward(
         self,
-        x: Float[torch.Tensor, "batch past_steps in_channels H W"],
+        x: Float[torch.Tensor, "batch input_steps in_channels H W"],
         steps: int,
         ensemble_size: int = 1,
     ) -> Float[torch.Tensor, "batch steps out_channels H W"]:
-        B, T, C, H, W = x.shape
-        # channel-stack all past frames: [B, T*C, H, W]
-        x_flat = x.reshape(B, T * C, H, W)
+        # channel-stack all input frames: (b, t, c, h, w) -> (b, t*c, h, w)
+        x_flat = einops.rearrange(x, "b t c h w -> b (t c) h w")
         preds = []
         for _ in range(steps):
-            y = self.unet(x_flat)   # [B, out_channels, H, W]
+            y = self.unet(x_flat)   # [B, num_vars, H, W]
             preds.append(y.unsqueeze(1))
-            # slide window: drop oldest frame, append latest prediction
-            x_flat = torch.cat([x_flat[:, C:], y], dim=1)
+            # slide window: drop the oldest timestep (first num_vars channels),
+            # append the latest prediction as the newest timestep
+            x_flat = torch.cat([x_flat[:, self.num_vars:], y], dim=1)
         return torch.cat(preds, dim=1)
 
 cfg = training_experiment.as_buildable()
 use_random_sampler(cfg)
 
-past_steps = cfg.data.dataset_factory.steps - cfg.data.dataset_factory.forecast_steps
 cfg.pl_module.network = fdl.Config(
     HalfUNetNowcaster,
-    in_channels=past_steps * 1,  # 1 variable (rainfall_flux)
-    out_channels=1,
+    input_steps=cfg.data.dataset_factory.input_steps,
+    num_vars=len(cfg.data.dataset_factory.standard_names),
 )
 
 train_from_config(cfg)
@@ -298,7 +297,7 @@ are only materialised at the end, by upsampling the final decoder hidden
 states back to the original spatial resolution.
 
 **Encoding** — a stack of `EncoderBlock` layers unrolls a ConvGRU
-sequentially over the `past_steps` real observed frames.  Each block halves
+sequentially over the `input_steps` real observed frames.  Each block halves
 the spatial resolution via `PixelUnshuffle(2)`.  The last hidden state of
 each block is retained.
 
@@ -322,10 +321,10 @@ concatenated along the channel dimension.
 
 ![ConvGruModel stochastic architecture](docs/architectures/convgru-stochastic.png)
 
-`past_steps` is derived at runtime from the data config:
+`input_steps` is directly available from the data config:
 ```
-past_steps = dataset_factory.steps - dataset_factory.forecast_steps
-           = 18 - 12 = 6  (defaults)
+input_steps = dataset_factory.input_steps
+            = 6  (default)
 ```
 
 ### Custom network interface
@@ -340,7 +339,7 @@ that `forward` accepts the following signature:
 
 def forward(
     self,
-    x: Float[torch.Tensor, "batch past_steps in_channels H W"],
+    x: Float[torch.Tensor, "batch input_steps in_channels H W"],
     steps: int,          # number of forecast steps to produce
     ensemble_size: int,  # number of stochastic ensemble members
 ) -> Float[torch.Tensor, "batch steps out_channels H W"]:

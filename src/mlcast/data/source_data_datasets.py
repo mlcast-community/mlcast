@@ -90,7 +90,7 @@ class SourceDataDatasetBase(Dataset, ABC):
 
     Subclasses must implement :meth:`__len__` and :meth:`__getitem__`.
     All common initialisation, Zarr access, CF-axis resolution, augmentation,
-    and the ``input_steps`` property live here.
+    and the ``steps`` property live here.
 
     Parameters
     ----------
@@ -98,12 +98,10 @@ class SourceDataDatasetBase(Dataset, ABC):
         Path to the Zarr dataset.
     standard_names : list of str
         List of CF standard names of variables to load.
-    steps : int
-        Total number of timesteps per sample (``input_steps + forecast_steps``).
+    input_steps : int
+        Number of past timesteps fed to the network as input.
     forecast_steps : int
-        Number of timesteps used as the forecast target.  Must be less than
-        ``steps``.  The remaining ``steps - forecast_steps`` timesteps form
-        the input.
+        Number of future timesteps the network should predict.
     return_mask : bool, optional
         If ``True``, also return a per-timestep validity mask for the target.
         Default is ``False``.
@@ -123,7 +121,7 @@ class SourceDataDatasetBase(Dataset, ABC):
         self,
         zarr_path: str,
         standard_names: list[str],
-        steps: int,
+        input_steps: int,
         forecast_steps: int,
         return_mask: bool = False,
         deterministic: bool = False,
@@ -132,14 +130,16 @@ class SourceDataDatasetBase(Dataset, ABC):
         height: int = 256,
         storage_options: dict[str, Any] | None = None,
     ) -> None:
-        if forecast_steps >= steps:
-            raise ValueError(f"forecast_steps ({forecast_steps}) must be less than steps ({steps}).")
+        if input_steps < 1:
+            raise ValueError(f"input_steps ({input_steps}) must be at least 1.")
+        if forecast_steps < 1:
+            raise ValueError(f"forecast_steps ({forecast_steps}) must be at least 1.")
 
         self.storage_options = storage_options
         self._zarr_path = zarr_path
         self._ds: xr.Dataset | None = None
         self.standard_names = standard_names
-        self.steps = steps
+        self.input_steps = input_steps
         self.forecast_steps = forecast_steps
         self.return_mask = return_mask
         self.augment = augment
@@ -155,15 +155,15 @@ class SourceDataDatasetBase(Dataset, ABC):
     # ------------------------------------------------------------------
 
     @property
-    def input_steps(self) -> int:
-        """Number of input timesteps fed to the network.
+    def steps(self) -> int:
+        """Total number of timesteps per sample (``input_steps + forecast_steps``).
 
         Returns
         -------
-        input_steps : int
-            ``steps - forecast_steps``.
+        steps : int
+            ``input_steps + forecast_steps``.
         """
-        return self.steps - self.forecast_steps
+        return self.input_steps + self.forecast_steps
 
     @property
     def ds(self) -> xr.Dataset:
@@ -307,12 +307,10 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
         top-left corner of each crop.
     standard_names : list of str
         List of CF standard names of variables to load (e.g., ``["rainfall_rate"]``).
-    steps : int
-        Number of timesteps to extract per sample (``input_steps + forecast_steps``).
+    input_steps : int
+        Number of past timesteps fed to the network as input.
     forecast_steps : int
-        Number of timesteps to use as the forecast target.  Must be less than
-        ``steps``.  The remaining ``steps - forecast_steps`` timesteps form the
-        input.
+        Number of future timesteps the network should predict.
     return_mask : bool, optional
         If ``True``, also return a per-timestep validity mask for the target.
         Default is ``False``.
@@ -335,7 +333,7 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
         zarr_path: str,
         csv_path: str,
         standard_names: list[str],
-        steps: int,
+        input_steps: int,
         forecast_steps: int,
         return_mask: bool = False,
         deterministic: bool = False,
@@ -350,7 +348,7 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
         super().__init__(
             zarr_path=zarr_path,
             standard_names=standard_names,
-            steps=steps,
+            input_steps=input_steps,
             forecast_steps=forecast_steps,
             return_mask=return_mask,
             deterministic=deterministic,
@@ -432,12 +430,10 @@ class SourceDataRandomSamplingDataset(SourceDataDatasetBase):
         Path to the Zarr dataset.
     standard_names : list of str
         List of CF standard names of variables to load (e.g., ``["rainfall_rate"]``).
-    steps : int
-        Number of timesteps to extract per sample (``input_steps + forecast_steps``).
+    input_steps : int
+        Number of past timesteps fed to the network as input.
     forecast_steps : int
-        Number of timesteps to use as the forecast target.  Must be less than
-        ``steps``.  The remaining ``steps - forecast_steps`` timesteps form the
-        input.
+        Number of future timesteps the network should predict.
     return_mask : bool, optional
         If ``True``, also return a per-timestep validity mask for the target.
         Default is ``False``.
@@ -461,7 +457,7 @@ class SourceDataRandomSamplingDataset(SourceDataDatasetBase):
         self,
         zarr_path: str,
         standard_names: list[str],
-        steps: int,
+        input_steps: int,
         forecast_steps: int,
         return_mask: bool = False,
         deterministic: bool = False,
@@ -477,7 +473,7 @@ class SourceDataRandomSamplingDataset(SourceDataDatasetBase):
         super().__init__(
             zarr_path=zarr_path,
             standard_names=standard_names,
-            steps=steps,
+            input_steps=input_steps,
             forecast_steps=forecast_steps,
             return_mask=return_mask,
             deterministic=deterministic,

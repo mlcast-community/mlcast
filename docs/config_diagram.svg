@@ -307,9 +307,9 @@
 <text text-anchor="start" x="609.5" y="-83.2" font-family="Courier,monospace" font-size="6.00">0</text>
 <polygon fill="#eeeeee" stroke="transparent" points="424,-57 424,-76 517,-76 517,-57 424,-57"/>
 <polygon fill="none" stroke="black" points="424,-57 424,-76 517,-76 517,-57 424,-57"/>
-<text text-anchor="start" x="482" y="-64" font-family="Courier,monospace" font-size="10.00">steps</text>
+<text text-anchor="start" x="446" y="-64" font-family="Courier,monospace" font-size="10.00">input_steps</text>
 <polygon fill="none" stroke="black" points="517,-57 517,-76 706,-76 706,-57 517,-57"/>
-<text text-anchor="start" x="521" y="-64" font-family="Courier,monospace" font-size="10.00">18</text>
+<text text-anchor="start" x="521" y="-64" font-family="Courier,monospace" font-size="10.00">6</text>
 <polygon fill="#eeeeee" stroke="transparent" points="424,-38 424,-57 517,-57 517,-38 424,-38"/>
 <polygon fill="none" stroke="black" points="424,-38 424,-57 517,-57 517,-38 424,-38"/>
 <text text-anchor="start" x="428" y="-45" font-family="Courier,monospace" font-size="10.00">forecast_steps</text>
