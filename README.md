@@ -289,93 +289,38 @@ mlcast/
 ### ConvGruModel
 
 `ConvGruModel` (in `src/mlcast/models/convgru.py`) is an **encoder-decoder**
-architecture.  It is **not autoregressive at forecast time**: the decoder
-generates all `forecast_steps` frames in a single forward pass from the
-encoder hidden state.
+architecture.  It is **not autoregressive at forecast time**: rather than
+generating each forecast frame from the previous predicted frame, the decoder
+performs a temporal roll-out entirely in **latent space** — the ConvGRU at
+each spatial scale unrolls over `forecast_steps` steps driven by noise or
+zeros, with its hidden state initialised from the encoder.  Forecast frames
+are only materialised at the end, by upsampling the final decoder hidden
+states back to the original spatial resolution.
 
 **Encoding** — a stack of `EncoderBlock` layers unrolls a ConvGRU
 sequentially over the `past_steps` real observed frames.  Each block halves
 the spatial resolution via `PixelUnshuffle(2)`.  The last hidden state of
 each block is retained.
 
-**Decoding** — a stack of `DecoderBlock` layers unrolls a ConvGRU over a
-synthetic `[batch, forecast_steps, …]` tensor (zeros for deterministic runs,
-Gaussian noise for stochastic ones).  At each decoder block the corresponding
-encoder hidden state is injected as the GRU's initial hidden state.  Spatial
-resolution is doubled at each block via `PixelShuffle(2)`.  Unlike the
-encoder, the decoder is not autoregressive — it does not feed its own output
-back as input between steps.
+**Decoding** — a stack of `DecoderBlock` layers performs a latent-space
+roll-out at each spatial scale.  Each decoder block's ConvGRU is initialised
+with the final hidden state from the corresponding encoder block, then unrolls
+over `forecast_steps` steps with noise or zeros as input — so the forecast
+sequence emerges from the evolution of hidden states across multiple spatial
+scales, never from feeding predictions back as inputs.  Spatial resolution is
+doubled at each block via `PixelShuffle(2)`.
 
 **Ensemble** — when `ensemble_size > 1` the decoder is run `ensemble_size`
 times, each time with freshly sampled Gaussian noise.  The results are
 concatenated along the channel dimension.
 
-```mermaid
-flowchart TB
-    X["x
-    [B, past_steps, C, H×W]"]
+**Deterministic variant** ([diagram source](https://docs.google.com/presentation/d/1U2Y9vZADXTsgQBNiWYAgOwYeMPVu7TOk/edit?slide=id.p6#slide=id.p6)):
 
-    subgraph EB1["EncoderBlock 1  —  scale: C, H×W"]
-        direction TB
-        EB1_loop["for t in 0 … past_steps−1:
-            hₜ = ConvGRUCell(x[:,t], hₜ₋₁)
-            out[:,t] = PixelUnshuffle(hₜ)
-        out: [B, past_steps, 4C, H/2×W/2]"]
-    end
+![ConvGruModel deterministic architecture](docs/architectures/convgru-deterministic.png)
 
-    subgraph EB2["EncoderBlock 2  —  scale: 4C, H/2×W/2"]
-        direction TB
-        EB2_loop["for t in 0 … past_steps−1:
-            hₜ = ConvGRUCell(eb1_out[:,t], hₜ₋₁)
-            out[:,t] = PixelUnshuffle(hₜ)
-        out: [B, past_steps, 16C, H/4×W/4]"]
-    end
+**Stochastic / ensemble variant** ([diagram source](https://docs.google.com/presentation/d/1U2Y9vZADXTsgQBNiWYAgOwYeMPVu7TOk/edit?slide=id.p7#slide=id.p7)):
 
-    subgraph EBN["EncoderBlock N  —  scale: 4^(N-1)C, H/2^(N-1)×W/2^(N-1)"]
-        direction TB
-        EBN_loop["for t in 0 … past_steps−1:
-            hₜ = ConvGRUCell(eb(N-1)_out[:,t], hₜ₋₁)
-            out[:,t] = PixelUnshuffle(hₜ)
-        out: [B, past_steps, 4^N·C, H/2^N×W/2^N]"]
-    end
-
-    subgraph Decoder["Decoder  (single forward pass — not autoregressive)"]
-        direction TB
-        DBN["DecoderBlock N
-            for t in 0 … forecast_steps−1:
-                hₜ = ConvGRUCell(noise[:,t], hₜ₋₁),  h₀ = ebN_out[:,-1]
-                out[:,t] = PixelShuffle(hₜ)
-            out: [B, forecast_steps, 4^(N-1)C, H/2^(N-1)×W/2^(N-1)]"]
-        DB2["DecoderBlock 2
-            for t in 0 … forecast_steps−1:
-                hₜ = ConvGRUCell(dbN_out[:,t], hₜ₋₁),  h₀ = eb2_out[:,-1]
-                out[:,t] = PixelShuffle(hₜ)
-            out: [B, forecast_steps, 4C, H/2×W/2]"]
-        DB1["DecoderBlock 1
-            for t in 0 … forecast_steps−1:
-                hₜ = ConvGRUCell(db2_out[:,t], hₜ₋₁),  h₀ = eb1_out[:,-1]
-                out[:,t] = PixelShuffle(hₜ)
-            out: [B, forecast_steps, C, H×W]"]
-        DBN --> DB2 --> DB1
-    end
-
-    Noise["zeros / noise
-    [B, forecast_steps, 4^N·C, H/2^N×W/2^N]
-    (passed in full, not fed back)"]
-
-    X -->|"full sequence"| EB1
-    EB1 -->|"full sequence [B, past_steps, 4C, H/2×W/2]"| EB2
-    EB2 -->|"full sequence [B, past_steps, 16C, H/4×W/4]"| EBN
-
-    EB1 -->|"eb1_out[:,-1]  [B, 4C, H/2×W/2]"| DB1
-    EB2 -->|"eb2_out[:,-1]  [B, 16C, H/4×W/4]"| DB2
-    EBN -->|"ebN_out[:,-1]  [B, 4^N·C, H/2^N×W/2^N]"| DBN
-
-    Noise --> DBN
-
-    DB1 --> Output["preds
-    [B, forecast_steps, C, H×W]"]
-```
+![ConvGruModel stochastic architecture](docs/architectures/convgru-stochastic.png)
 
 `past_steps` is derived at runtime from the data config:
 ```
