@@ -4,3 +4,8 @@ __pycache__/
 build/
 dist/
 .venv/
+logs/
+.pytest_cache/
+data/
+mlruns/
+MagicMock/

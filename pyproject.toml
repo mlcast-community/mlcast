@@ -23,7 +23,6 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -32,33 +31,62 @@ classifiers = [
 ]
 
 dependencies = [
-  "absl-py>=2.4.0",
-  "etils>=1.13.0",
-  "fiddle>=0.3.0",
+  "absl-py>=2.4",
+  "beartype>=0.18",
+  "cf-xarray>=0.10",
+  "etils>=1.13",
+  "fiddle>=0.3",
   "fire>=0.7",
-  "importlib-resources>=5.0",
+  "importlib-resources>=5",
   "ipykernel>=6.29.5",
+  "jaxtyping>=0.2",
+  "loguru>=0.7.3",
+  "mlflow[mlflow]>=3.11.1",
   "numpy>=2.2.6",
-  "pyyaml>=6.0",
-  "pandas>=2.0",
-  "pytorch-lightning>=2.0",
-  "tensorboard>=2.20.0",
+  "nvidia-ml-py[mlflow]>=13.595.45",
+  "pandas>=2",
+  "psutil[mlflow]>=7.2.2",
+  "pytorch-lightning>=2",
+  "pyyaml>=6",
+  "rich>=13",
+  "s3fs>=2026.3",
+  "tensorboard>=2.20",
   "torch>=2.7.1",
   "torchvision>=0.20",
   "xarray>=2025.6.1",
   "zarr>=3",
 ]
 
-scripts.mlcast = "mlcast.__main__:cli"
-
 optional-dependencies.dev = [
+  "aiohttp>=3.9.3",
+  "fsspec>=2024.2",
+  "mypy>=1",
   "pre-commit>=3.5",
+  "pytest>=8",
+  "pytest-cov>=4.1",
   "ruff>=0.8",
+  "s3fs>=2024.2",
+]
+optional-dependencies.gpu-cu128 = [
+  "torch>=2.7.1",
+  "torchvision>=0.20",
+]
+optional-dependencies.gpu-cu130 = [
+  "torch>=2.7.1",
+  "torchvision>=0.20",
 ]
 urls.Documentation = "https://github.com/mlcast-community/mlcast"
 urls.Homepage = "https://github.com/mlcast-community/mlcast"
 urls.Issues = "https://github.com/mlcast-community/mlcast/issues"
 urls.Repository = "https://github.com/mlcast-community/mlcast"
+
+scripts.mlcast = "mlcast.__main__:cli"
+
+[dependency-groups]
+dev = [
+  "pytest>=9.0.3",
+]
+mlflow = [  ]
 
 [tool.ruff]
 line-length = 120
@@ -76,7 +104,7 @@ lint.select = [
   "UP", # pyupgrade
   "W",  # pycodestyle warnings
 ]
-lint.ignore = [  ]
+lint.ignore = [ "F722" ]
 
 [tool.mypy]
 strict = false
@@ -91,3 +119,31 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "gpu-cu128" },
+    { extra = "gpu-cu130" },
+  ],
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu128", extra = "gpu-cu128" },
+  { index = "pytorch-cu130", extra = "gpu-cu130" },
+]
+torchvision = [
+  { index = "pytorch-cu128", extra = "gpu-cu128" },
+  { index = "pytorch-cu130", extra = "gpu-cu130" },
+]

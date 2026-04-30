@@ -1,309 +1,412 @@
-"""Concrete Lightning module for ConvGRU-based radar precipitation nowcasting.
+"""ConvGRU encoder-decoder architecture for spatio-temporal forecasting.
 
-Wraps the :class:`EncoderDecoder` model and handles training, validation,
-and test steps including loss computation, ensemble generation, and
-TensorBoard image logging.
+Provides the building blocks (ConvGRUCell, ConvGRU, Encoder, Decoder) and
+the full EncoderDecoder model with optional ensemble generation via noisy
+decoder inputs.
 """
 
-from typing import Any
-
-import numpy as np
-import pytorch_lightning as pl
 import torch
-import torchvision
-
-from mlcast.losses import build_loss
-from mlcast.modules.convgru_modules import EncoderDecoder
-from mlcast.utils import normalized_to_rainrate, rainrate_to_normalized
+import torch.nn as nn
+from beartype import beartype
+from jaxtyping import Float, jaxtyped
 
 
-def apply_radar_colormap(tensor: torch.Tensor) -> torch.Tensor:
-    """Convert grayscale radar values to RGB using the STEPS-BE colorscale.
+class ConvGRUCell(nn.Module):
+    """Convolutional GRU cell operating on 2D spatial grids.
 
-    Maps normalized values in [0, 1] (representing 0-60 dBZ) to a 14-color
-    discrete colormap. Pixels below 10 dBZ are rendered as white.
+    Implements a single-step GRU update where all linear projections are
+    replaced by 2D convolutions, preserving spatial structure.
 
     Parameters
     ----------
-    tensor : torch.Tensor
-        Grayscale tensor with values in [0, 1], of shape ``(N, 1, H, W)``.
-
-    Returns
-    -------
-    rgb : torch.Tensor
-        RGB tensor of shape ``(N, 3, H, W)`` with values in [0, 1].
-    """
-    colors = (
-        torch.tensor(
-            [
-                [0, 255, 255],
-                [0, 191, 255],
-                [30, 144, 255],
-                [0, 0, 255],
-                [127, 255, 0],
-                [50, 205, 50],
-                [0, 128, 0],
-                [0, 100, 0],
-                [255, 255, 0],
-                [255, 215, 0],
-                [255, 165, 0],
-                [255, 0, 0],
-                [255, 0, 255],
-                [139, 0, 139],
-            ],
-            dtype=torch.float32,
-            device=tensor.device,
-        )
-        / 255.0
-    )
-
-    num_colors = len(colors)
-    min_dbz_norm = 10 / 60
-    max_dbz_norm = 1.0
-    thresholds = torch.linspace(min_dbz_norm, max_dbz_norm, num_colors + 1, device=tensor.device)
-
-    N, _, H, W = tensor.shape
-    output = torch.ones(N, 3, H, W, dtype=torch.float32, device=tensor.device)
-
-    for i in range(num_colors - 1):
-        mask = (tensor[:, 0] >= thresholds[i]) & (tensor[:, 0] < thresholds[i + 1])
-        for c in range(3):
-            output[:, c][mask] = colors[i, c]
-
-    mask = tensor[:, 0] >= thresholds[num_colors - 1]
-    for c in range(3):
-        output[:, c][mask] = colors[-1, c]
-
-    return output
-
-
-class RadarLightningModel(pl.LightningModule):
-    """PyTorch Lightning module for radar precipitation nowcasting.
-
-    Wraps an :class:`EncoderDecoder` model and handles training, validation,
-    and test steps including loss computation, ensemble generation, and
-    TensorBoard image logging.
-
-    Parameters
-    ----------
-    input_channels : int
-        Number of input channels per grid point.
-    num_blocks : int
-        Number of encoder/decoder blocks in the model.
-    ensemble_size : int, optional
-        Number of ensemble members to generate. Default is ``1``.
-    noisy_decoder : bool, optional
-        Whether to use random noise as decoder input. Default is ``False``.
-    forecast_steps : int or None, optional
-        Number of future timesteps to forecast. Default is ``None``.
-    loss_class : type, str, or None, optional
-        Loss function class or its string name. Default is ``None`` (MSELoss).
-    loss_params : dict or None, optional
-        Keyword arguments for the loss constructor. Default is ``None``.
-    masked_loss : bool, optional
-        Whether to wrap the loss with :class:`MaskedLoss`. Default is ``False``.
-    optimizer_class : type or None, optional
-        Optimizer class. Default is ``None`` (Adam).
-    optimizer_params : dict or None, optional
-        Keyword arguments for the optimizer. Default is ``None``.
-    lr_scheduler_class : type or None, optional
-        Learning rate scheduler class. Default is ``None``.
-    lr_scheduler_params : dict or None, optional
-        Keyword arguments for the LR scheduler. Default is ``None``.
+    input_size : int
+        Number of channels in the input tensor.
+    hidden_size : int
+        Number of channels in the hidden state.
+    kernel_size : int, optional
+        Kernel size for the convolutional gates. Default is ``3``.
+    conv_layer : nn.Module, optional
+        Convolutional layer class to use. Default is ``nn.Conv2d``.
     """
 
     def __init__(
-        self,
-        input_channels: int,
-        num_blocks: int,
-        ensemble_size: int = 1,
-        noisy_decoder: bool = False,
-        forecast_steps: type | int | None = None,
-        loss_class: type | str | None = None,
-        loss_params: dict[str, Any] | None = None,
-        masked_loss: bool = False,
-        optimizer_class: type | None = None,
-        optimizer_params: dict[str, Any] | None = None,
-        lr_scheduler_class: type | None = None,
-        lr_scheduler_params: dict[str, Any] | None = None,
-    ) -> None:
+        self, input_size: int, hidden_size: int, kernel_size: int = 3, conv_layer: type[nn.Module] = nn.Conv2d
+    ):
         super().__init__()
-        self.save_hyperparameters()
+        padding = kernel_size // 2
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.combined_gates = conv_layer(input_size + hidden_size, 2 * hidden_size, kernel_size, padding=padding)
+        self.out_gate = conv_layer(input_size + hidden_size, hidden_size, kernel_size, padding=padding)
 
-        self.model = EncoderDecoder(self.hparams.input_channels, self.hparams.num_blocks)
-
-        self.criterion = build_loss(
-            loss_class=self.hparams.loss_class,
-            loss_params=self.hparams.loss_params,
-            masked_loss=self.hparams.masked_loss,
-        )
-        self.log_images_iterations = [50, 100, 200, 500, 750, 1000, 2000, 5000]
-
-    def forward(self, x: torch.Tensor, forecast_steps: int, ensemble_size: int | None = None) -> torch.Tensor:
-        """Run the encoder-decoder forward pass."""
-        ensemble_size = self.hparams.ensemble_size if ensemble_size is None else ensemble_size
-        return self.model(
-            x, steps=forecast_steps, noisy_decoder=self.hparams.noisy_decoder, ensemble_size=ensemble_size
-        )
-
-    def shared_step(
-        self, batch: dict[str, torch.Tensor], split: str = "train", ensemble_size: int | None = None
-    ) -> torch.Tensor:
-        """Shared forward step for training, validation, and testing."""
-        data = batch["data"]
-        past = data[:, : -self.hparams.forecast_steps]
-        future = data[:, -self.hparams.forecast_steps :]
-
-        preds = self(past, forecast_steps=self.hparams.forecast_steps, ensemble_size=ensemble_size).clamp(min=-1, max=1)
-
-        if self.hparams.masked_loss:
-            mask = batch["mask"][:, -self.hparams.forecast_steps :]
-            loss = self.criterion(preds, future, mask)
-        else:
-            loss = self.criterion(preds, future)
-
-        if isinstance(loss, tuple):
-            loss, log_dict = loss
-            self.log_dict(
-                log_dict, prog_bar=False, logger=True, on_step=(split == "train"), on_epoch=True, sync_dist=True
-            )
-
-        self.log(f"{split}_loss", loss, prog_bar=True, on_epoch=True, on_step=(split == "train"), sync_dist=True)
-
-        if self.hparams.ensemble_size > 1:
-            ensemble_std = preds.std(dim=2).mean()
-            self.log(f"{split}_ensemble_std", ensemble_std, on_epoch=True, sync_dist=True)
-
-        if split == "train" and (
-            self.global_step in self.log_images_iterations or self.global_step % self.log_images_iterations[-1] == 0
-        ):
-            self.log_images(past, future, preds, split=split)
-        return loss
-
-    def log_images(self, past: torch.Tensor, future: torch.Tensor, preds: torch.Tensor, split: str = "val") -> None:
-        """Log radar image grids to TensorBoard."""
-        sample_idx = 0
-
-        past_sample = past[sample_idx]
-        if self.hparams.ensemble_size > 1:
-            past_sample = past_sample.mean(dim=1, keepdim=True)
-        past_norm = (past_sample + 1) / 2
-        past_rgb = apply_radar_colormap(past_norm)
-        past_grid = torchvision.utils.make_grid(past_rgb, nrow=past_sample.shape[0])
-        self.logger.experiment.add_image(f"{split}/past", past_grid, self.global_step)
-
-        future_sample = future[sample_idx]
-        preds_sample = preds[sample_idx]
-
-        if self.hparams.ensemble_size > 1:
-            preds_avg = preds_sample.mean(dim=1, keepdim=True)
-            num_members_to_log = min(3, preds_sample.shape[1])
-
-            rows = [future_sample]
-            rows.append(preds_avg)
-            for i in range(num_members_to_log):
-                rows.append(preds_sample[:, i : i + 1, :, :])
-
-            all_frames = torch.cat(rows, dim=0)
-            all_frames_norm = (all_frames + 1) / 2
-            all_frames_rgb = apply_radar_colormap(all_frames_norm)
-            grid = torchvision.utils.make_grid(all_frames_rgb, nrow=future_sample.shape[0])
-            self.logger.experiment.add_image(f"{split}/preds", grid, self.global_step)
-        else:
-            rows = [future_sample, preds_sample]
-            all_frames = torch.cat(rows, dim=0)
-            all_frames_norm = (all_frames + 1) / 2
-            all_frames_rgb = apply_radar_colormap(all_frames_norm)
-            grid = torchvision.utils.make_grid(all_frames_rgb, nrow=future_sample.shape[0])
-            self.logger.experiment.add_image(f"{split}/preds", grid, self.global_step)
-
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        return self.shared_step(batch, split="train")
-
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        return self.shared_step(batch, split="val", ensemble_size=10)
-
-    def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        return self.shared_step(batch, split="test", ensemble_size=10)
-
-    def configure_optimizers(self) -> dict[str, Any]:
-        """Configure the optimizer and optional learning rate scheduler."""
-        if self.hparams.optimizer_class is not None:
-            optimizer = (
-                self.hparams.optimizer_class(self.parameters(), **self.hparams.optimizer_params)
-                if self.hparams.optimizer_params is not None
-                else self.hparams.optimizer_class(self.parameters())
-            )
-        else:
-            optimizer = torch.optim.Adam(self.parameters())
-
-        if self.hparams.lr_scheduler_class is not None:
-            lr_scheduler = (
-                self.hparams.lr_scheduler_class(optimizer, **self.hparams.lr_scheduler_params)
-                if self.hparams.lr_scheduler_params is not None
-                else self.hparams.lr_scheduler_class(optimizer)
-            )
-            return {"optimizer": optimizer, "lr_scheduler": {"scheduler": lr_scheduler, "monitor": "val_loss"}}
-        else:
-            return {"optimizer": optimizer}
-
-    @classmethod
-    def from_checkpoint(cls, checkpoint_path: str, device: str = "cpu") -> "RadarLightningModel":
-        """Load a model from a checkpoint file."""
-        return cls.load_from_checkpoint(
-            checkpoint_path,
-            map_location=torch.device(device),
-            strict=True,
-            weights_only=False,
-        )
-
-    def predict(self, past: torch.Tensor, forecast_steps: int = 1, ensemble_size: int | None = 1) -> np.ndarray:
-        """Generate precipitation forecasts from past radar observations.
-
-        Input should be raw rain rate values.
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self,
+        inpt: Float[torch.Tensor, "batch in_channels height width"] | None = None,
+        h_s: Float[torch.Tensor, "batch hidden_channels height width"] | None = None,
+    ) -> Float[torch.Tensor, "batch hidden_channels height width"]:
+        """Forward the ConvGRU cell for a single timestep.
 
         Parameters
         ----------
-        past : torch.Tensor
-            Past radar frames as rain rate in mm/h, of shape ``(T, H, W)``.
-        forecast_steps : int, optional
-            Number of future timesteps to forecast. Default is ``1``.
-        ensemble_size : int, optional
-            Number of ensemble members. Default is ``1``.
+        inpt : Float[torch.Tensor, "batch in_channels height width"] or None, optional
+            Input tensor.
+        h_s : Float[torch.Tensor, "batch hidden_channels height width"] or None, optional
+            Hidden state tensor.
 
         Returns
         -------
-        preds : np.ndarray
-            Forecasted rain rate in mm/h, of shape
-            ``(ensemble_size, forecast_steps, H, W)``.
+        new_state : Float[torch.Tensor, "batch hidden_channels height width"]
+            Updated hidden state.
         """
-        if len(past.shape) != 3:
-            raise ValueError("Input must be of shape (T, H, W)")
+        if h_s is None and inpt is None:
+            raise ValueError("Both input and state can't be None")
+        elif h_s is None and inpt is not None:
+            h_s = torch.zeros(
+                inpt.size(0), self.hidden_size, inpt.size(2), inpt.size(3), dtype=inpt.dtype, device=inpt.device
+            )
+        elif inpt is None and h_s is not None:
+            inpt = torch.zeros(
+                h_s.size(0), self.input_size, h_s.size(2), h_s.size(3), dtype=h_s.dtype, device=h_s.device
+            )
 
-        T, H, W = past.shape
-        ensemble_size = self.hparams.ensemble_size if ensemble_size is None else ensemble_size
+        assert inpt is not None
+        assert h_s is not None
 
-        divisor = 2 ** (self.hparams.num_blocks)
-        padH = (divisor - (H % divisor)) % divisor
-        padW = (divisor - (W % divisor)) % divisor
-        padded_past = past
-        if padH != 0 or padW != 0:
-            padded_past = np.pad(past, ((0, 0), (0, padH), (0, padW)), mode="constant", constant_values=0)
+        gamma, beta = torch.chunk(self.combined_gates(torch.cat([inpt, h_s], dim=1)), 2, dim=1)
+        update = torch.sigmoid(gamma)
+        reset = torch.sigmoid(beta)
 
-        past_clean = np.nan_to_num(padded_past)
-        past_clean = past_clean[np.newaxis, :, np.newaxis, ...]
-        norm_past = rainrate_to_normalized(past_clean)
-        x = torch.from_numpy(norm_past)
-        x = x.to(self.device)
+        out_inputs = torch.tanh(self.out_gate(torch.cat([inpt, h_s * reset], dim=1)))
+        new_state = h_s * (1 - update) + out_inputs * update
 
-        self.eval()
-        with torch.no_grad():
-            preds = self.model(x, forecast_steps, self.hparams.noisy_decoder, ensemble_size)
+        return new_state
 
-        preds = preds.cpu().numpy()
-        preds = normalized_to_rainrate(preds)
-        preds = preds.squeeze(0)
-        preds = np.swapaxes(preds, 0, 1)
-        preds = preds[..., :H, :W]
 
-        return preds
+class ConvGRU(nn.Module):
+    """Convolutional GRU that unrolls a :class:`ConvGRUCell` over a sequence.
+
+    Parameters
+    ----------
+    input_size : int
+        Number of channels in the input tensor.
+    hidden_size : int
+        Number of channels in the hidden state.
+    kernel_size : int, optional
+        Kernel size for the convolutional gates. Default is ``3``.
+    conv_layer : nn.Module, optional
+        Convolutional layer class to use. Default is ``nn.Conv2d``.
+    """
+
+    def __init__(
+        self, input_size: int, hidden_size: int, kernel_size: int = 3, conv_layer: type[nn.Module] = nn.Conv2d
+    ):
+        super().__init__()
+        self.cell = ConvGRUCell(input_size, hidden_size, kernel_size, conv_layer)
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch time in_channels height width"] | None = None,
+        h: Float[torch.Tensor, "batch hidden_channels height width"] | None = None,
+    ) -> Float[torch.Tensor, "batch time hidden_channels height width"]:
+        """Unroll the ConvGRU cell over the sequence (time) dimension.
+
+        Parameters
+        ----------
+        x : Float[torch.Tensor, "batch time in_channels height width"] or None, optional
+            Input sequence.
+        h : Float[torch.Tensor, "batch hidden_channels height width"] or None, optional
+            Initial hidden state.
+
+        Returns
+        -------
+        hidden_states : Float[torch.Tensor, "batch time hidden_channels height width"]
+            Stacked hidden states.
+        """
+        if x is None:
+            raise ValueError("Input sequence x cannot be None")
+
+        h_s = []
+        for i in range(x.size(1)):
+            h = self.cell(x[:, i], h)
+            h_s.append(h)
+        return torch.stack(h_s, dim=1)
+
+
+class EncoderBlock(nn.Module):
+    """ConvGRU-based encoder block with spatial downsampling.
+
+    Applies a :class:`ConvGRU` followed by ``nn.PixelUnshuffle(2)`` to
+    halve spatial dimensions and quadruple channels.
+
+    Parameters
+    ----------
+    input_size : int
+        Number of input channels.
+    kernel_size : int, optional
+        Kernel size for the ConvGRU. Default is ``3``.
+    conv_layer : nn.Module, optional
+        Convolutional layer class to use. Default is ``nn.Conv2d``.
+    """
+
+    def __init__(self, input_size: int, kernel_size: int = 3, conv_layer: type[nn.Module] = nn.Conv2d):
+        super().__init__()
+        self.convgru = ConvGRU(input_size, input_size, kernel_size, conv_layer)
+        self.down = nn.PixelUnshuffle(2)
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, x: Float[torch.Tensor, "batch time in_channels height width"]
+    ) -> Float[torch.Tensor, "batch time out_channels out_height out_width"]:
+        """Forward the encoder block.
+
+        Parameters
+        ----------
+        x : Float[torch.Tensor, "batch time in_channels height width"]
+            Input sequence.
+
+        Returns
+        -------
+        out : Float[torch.Tensor, "batch time out_channels out_height out_width"]
+            Downsampled tensor, where out_channels is 4*in_channels,
+            and spatial dimensions are halved.
+        """
+        x = self.convgru(x)
+        x = self.down(x)
+        return x
+
+
+class Encoder(nn.Module):
+    r"""ConvGRU-based encoder that stacks multiple :class:`EncoderBlock` layers.
+
+    After each block the spatial resolution is halved via pixel-unshuffle.
+
+    .. code-block:: text
+
+         ///    Encoder Block 1    \\\                ///    Encoder Block 2    \\\
+     /--------------------------------------------\ /---------------------------------------\
+    |                                              |                                         |
+    *        *---------*      *-----------------*  *   *---------*      *-----------------*  *
+        X -> | ConvGRU | ---> | Pixel Unshuffle | ---> | ConvGRU | ---> | Pixel Unshuffle | ---> ...
+        |    *---------*  |   *-----------------*  |   *---------*  |   *-----------------*  |
+        v                 v                        v                v                        v
+      (b,t,c,h,w)      (b,t,c,h,w)          (b,t,c*4,h/2,w/2) (b,t,c*4,h/2,w/2)    (b,t,c*16,h/4,w/4)
+
+    Parameters
+    ----------
+    input_channels : int, optional
+        Number of input channels. Default is ``1``.
+    num_blocks : int, optional
+        Number of encoder blocks to stack. Default is ``4``.
+    **kwargs
+        Additional keyword arguments forwarded to each :class:`EncoderBlock`.
+    """
+
+    def __init__(self, input_channels: int = 1, num_blocks: int = 4, **kwargs):
+        super().__init__()
+        self.channel_sizes = [input_channels * 4**i for i in range(num_blocks)]
+        self.blocks = nn.ModuleList([EncoderBlock(self.channel_sizes[i], **kwargs) for i in range(num_blocks)])
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, x: Float[torch.Tensor, "batch time channels height width"]
+    ) -> list[Float[torch.Tensor, "batch time _ _ _"]]:
+        """Forward the encoder through all blocks.
+
+        Parameters
+        ----------
+        x : Float[torch.Tensor, "batch time channels height width"]
+            Input sequence.
+
+        Returns
+        -------
+        hidden_states : list of Float[torch.Tensor, "batch time _ _ _"]
+            Hidden state tensors from each block, with progressively reduced
+            spatial dimensions.
+        """
+        hidden_states = []
+        for block in self.blocks:
+            x = block(x)
+            hidden_states.append(x)
+        return hidden_states
+
+
+class DecoderBlock(nn.Module):
+    """ConvGRU-based decoder block with spatial upsampling.
+
+    Applies a :class:`ConvGRU` followed by ``nn.PixelShuffle(2)`` to double
+    spatial dimensions and quarter channels.
+
+    Parameters
+    ----------
+    input_size : int
+        Number of input channels.
+    hidden_size : int
+        Number of hidden channels for the ConvGRU.
+    kernel_size : int, optional
+        Kernel size for the ConvGRU. Default is ``3``.
+    conv_layer : nn.Module, optional
+        Convolutional layer class to use. Default is ``nn.Conv2d``.
+    """
+
+    def __init__(
+        self, input_size: int, hidden_size: int, kernel_size: int = 3, conv_layer: type[nn.Module] = nn.Conv2d
+    ):
+        super().__init__()
+        self.convgru = ConvGRU(input_size, hidden_size, kernel_size, conv_layer)
+        self.up = nn.PixelShuffle(2)
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch time in_channels height width"],
+        hidden_state: Float[torch.Tensor, "batch in_channels height width"],
+    ) -> Float[torch.Tensor, "batch time out_channels out_height out_width"]:
+        """Forward the decoder block.
+
+        Parameters
+        ----------
+        x : Float[torch.Tensor, "batch time in_channels height width"]
+            Input sequence.
+        hidden_state : Float[torch.Tensor, "batch in_channels height width"]
+            Hidden state from the corresponding encoder block.
+
+        Returns
+        -------
+        out : Float[torch.Tensor, "batch time out_channels out_height out_width"]
+            Upsampled tensor, where out_channels is in_channels / 4,
+            and spatial dimensions are doubled.
+        """
+        x = self.convgru(x, hidden_state)
+        x = self.up(x)
+        return x
+
+
+class Decoder(nn.Module):
+    """ConvGRU-based decoder that stacks multiple :class:`DecoderBlock` layers.
+
+    After each block the spatial resolution is doubled via pixel-shuffle.
+
+    Parameters
+    ----------
+    output_channels : int, optional
+        Number of output channels. Default is ``1``.
+    num_blocks : int, optional
+        Number of decoder blocks to stack. Default is ``4``.
+    **kwargs
+        Additional keyword arguments forwarded to each :class:`DecoderBlock`.
+    """
+
+    def __init__(self, output_channels: int = 1, num_blocks: int = 4, **kwargs):
+        super().__init__()
+        self.channel_sizes = [output_channels * 4 ** (i + 1) for i in reversed(range(num_blocks))]
+        self.blocks = nn.ModuleList(
+            [DecoderBlock(self.channel_sizes[i], self.channel_sizes[i], **kwargs) for i in range(num_blocks)]
+        )
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch time hidden_channels height width"],
+        hidden_states: list[Float[torch.Tensor, "batch _ _ _"]],
+    ) -> Float[torch.Tensor, "batch time out_channels out_height out_width"]:
+        """Forward the decoder through all blocks.
+
+        Parameters
+        ----------
+        x : Float[torch.Tensor, "batch time hidden_channels height width"]
+            Initial decoder input (usually zeros or noise).
+        hidden_states : list of Float[torch.Tensor, "batch _ _ _"]
+            Hidden states from the encoder (in reverse order), one per block.
+
+        Returns
+        -------
+        out : Float[torch.Tensor, "batch time out_channels out_height out_width"]
+            Output tensor at original spatial resolution.
+        """
+        for block, hidden_state in zip(self.blocks, hidden_states, strict=True):
+            x = block(x, hidden_state)
+        return x
+
+
+class ConvGruModel(nn.Module):
+    """Full encoder-decoder model for spatio-temporal forecasting.
+
+    Encodes an input sequence into multi-scale hidden states and decodes
+    them into a forecast sequence, optionally generating multiple ensemble
+    members via noisy decoder inputs.
+
+    Parameters
+    ----------
+    input_channels : int, optional
+        Number of input channels. Default is ``1``.
+    num_blocks : int, optional
+        Number of encoder and decoder blocks. Default is ``4``.
+    noisy_decoder : bool, optional
+        If ``True``, feed random noise as decoder input. Default is ``False``.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`Encoder` and
+        :class:`Decoder`.
+    """
+
+    def __init__(self, input_channels: int = 1, num_blocks: int = 4, noisy_decoder: bool = False, **kwargs):
+        super().__init__()
+        self.input_channels = input_channels
+        self.num_blocks = num_blocks
+        self.noisy_decoder = noisy_decoder
+        self.encoder = Encoder(input_channels, num_blocks, **kwargs)
+        self.decoder = Decoder(input_channels, num_blocks, **kwargs)
+
+    @jaxtyped(typechecker=beartype)
+    def forward(
+        self, x: Float[torch.Tensor, "batch time channels height width"], steps: int, ensemble_size: int = 1
+    ) -> Float[torch.Tensor, "batch steps _ height width"]:
+        """Forward the encoder-decoder model.
+
+        Parameters
+        ----------
+        x : Float[torch.Tensor, "batch time channels height width"]
+            Input sequence.
+        steps : int
+            Number of future timesteps to forecast.
+        ensemble_size : int, optional
+            Number of ensemble members to generate. When ``> 1``, the decoder
+            is always run with noisy inputs. Default is ``1``.
+
+        Returns
+        -------
+        preds : Float[torch.Tensor, "batch steps out_channels height width"]
+            Forecast tensor.
+        """
+        _, _, _, H, W = x.shape
+        divisor = 2**self.num_blocks
+        pad_h = (divisor - (H % divisor)) % divisor
+        pad_w = (divisor - (W % divisor)) % divisor
+
+        if pad_h > 0 or pad_w > 0:
+            x = torch.nn.functional.pad(x, (0, pad_w, 0, pad_h), mode="constant", value=0.0)
+
+        encoded = self.encoder(x)
+
+        x_dec_shape = list(encoded[-1].shape)
+        x_dec_shape[1] = steps
+
+        last_hidden_per_block = [e[:, -1] for e in reversed(encoded)]
+
+        if ensemble_size > 1:
+            preds = []
+            for _ in range(ensemble_size):
+                x_dec = torch.randn(x_dec_shape, dtype=encoded[-1].dtype, device=encoded[-1].device)
+                decoded = self.decoder(x_dec, last_hidden_per_block)
+                preds.append(decoded)
+            out = torch.cat(preds, dim=2)
+        else:
+            x_dec_func = torch.randn if self.noisy_decoder else torch.zeros
+            x_dec = x_dec_func(x_dec_shape, dtype=encoded[-1].dtype, device=encoded[-1].device)
+            out = self.decoder(x_dec, last_hidden_per_block)
+
+        if pad_h > 0 or pad_w > 0:
+            out = out[..., :H, :W]
+
+        return out

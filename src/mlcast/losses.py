@@ -7,6 +7,7 @@ loss instances by name.
 from typing import Any
 
 import torch
+from loguru import logger
 from torch import nn
 
 
@@ -86,7 +87,11 @@ class MaskedLoss(LossWithReduction):
             else:
                 return masked_loss
         else:
-            return torch.tensor(0.0, device=preds.device)
+            logger.warning(
+                "Encountered a training batch with all NaNs (completely masked). "
+                "The loss and gradients for this batch will be exactly zero."
+            )
+            return masked_loss.sum() * 0.0
 
 
 class CRPS(LossWithReduction):
@@ -139,7 +144,7 @@ class CRPS(LossWithReduction):
         return self.apply_reduction(crps)
 
 
-class afCRPS(LossWithReduction):
+class AFCRPS(LossWithReduction):
     r"""Almost fair CRPS (afCRPS) loss as in eq. (4) of Lang et al. (2024).
 
     Interpolates between the standard CRPS and the fair CRPS via the
@@ -153,6 +158,13 @@ class afCRPS(LossWithReduction):
         Weight for the temporal consistency penalty. Default is ``0.0``.
     reduction : str, optional
         Reduction mode. Default is ``'mean'``.
+
+    Expected shapes
+    ---------------
+    preds : (B, T, M, \*D)
+        Ensemble predictions with ensemble size M on dim=2.
+    target : (B, T, C, \*D)
+        Deterministic target with channel C on dim=2 (should be 1).
     """
 
     def __init__(self, alpha: float = 0.95, temporal_lambda: float = 0.0, reduction: str = "mean"):
@@ -207,11 +219,11 @@ class afCRPS(LossWithReduction):
         return self.apply_reduction(afcrps)
 
 
-PIXEL_LOSSES = {"mse": nn.MSELoss, "mae": nn.L1Loss, "crps": CRPS, "afcrps": afCRPS}
+PIXEL_LOSSES = {"mse": nn.MSELoss, "mae": nn.L1Loss, "crps": CRPS, "afcrps": AFCRPS}
 
 
 def build_loss(
-    loss_class: type | str,
+    loss_class: type[nn.Module] | str = "mse",
     loss_params: dict[str, Any] | None = None,
     masked_loss: bool = False,
 ) -> nn.Module:
@@ -219,9 +231,11 @@ def build_loss(
 
     Parameters
     ----------
-    loss_class : type or str
+    loss_class : type[nn.Module] or str, optional
         Loss class or its string name. Accepted names: ``'mse'``, ``'mae'``,
-        ``'crps'``, ``'afcrps'``.
+        ``'crps'``, ``'afcrps'``. If a class is provided, it must be a callable
+        (e.g., a subclass of nn.Module) that accepts the keyword arguments
+        provided in ``loss_params``. Default is ``'mse'``.
     loss_params : dict, optional
         Keyword arguments for the loss constructor. Default is ``None``.
     masked_loss : bool, optional
@@ -232,24 +246,27 @@ def build_loss(
     criterion : nn.Module
         Instantiated loss module.
     """
+    if not isinstance(loss_class, str | type):
+        raise TypeError(f"loss_class must be a string or a class, got {type(loss_class)}")
+
     if isinstance(loss_class, str):
         if loss_class.lower() not in PIXEL_LOSSES:
             raise ValueError(f"Unknown loss class '{loss_class}'. Available: {list(PIXEL_LOSSES.keys())}")
-        loss_class = PIXEL_LOSSES[loss_class.lower()]
-    elif loss_class is None:
-        loss_class = nn.MSELoss
+        LossClass = PIXEL_LOSSES[loss_class.lower()]
+    else:
+        LossClass = loss_class
 
     params = loss_params.copy() if loss_params is not None else None
 
     if masked_loss and params is not None:
         reduction = params.pop("reduction", "mean")
-        criterion = MaskedLoss(loss_class(reduction="none", **params), reduction=reduction)
+        criterion = MaskedLoss(LossClass(reduction="none", **params), reduction=reduction)
     elif masked_loss:
-        criterion = MaskedLoss(loss_class(reduction="none"), reduction="mean")
+        criterion = MaskedLoss(LossClass(reduction="none"), reduction="mean")
     else:
         if params is not None:
-            criterion = loss_class(**params)
+            criterion = LossClass(**params)
         else:
-            criterion = loss_class()
+            criterion = LossClass()
 
     return criterion
