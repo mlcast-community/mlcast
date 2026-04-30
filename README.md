@@ -10,16 +10,10 @@ This repo contains the `mlcast` package for machine learning-based weather nowca
 
 ## Installation
 
-mlcast is in rapid development — the recommended path is to run directly from
-GitHub or clone locally, rather than installing a pinned release from PyPI.
+As `mlcast` is in rapid development — the recommended path is to clone locally,
+rather than installing a pinned release from PyPI.
 
-### Recommended: run from GitHub with uvx (no local clone needed)
-
-```bash
-uvx --from git+https://github.com/mlcast-community/mlcast mlcast train
-```
-
-### Recommended: clone and install locally with uv
+### Local development: clone and install locally with uv
 
 [Fork the repository](https://github.com/mlcast-community/mlcast/fork) on GitHub first, then clone your fork. This lets you track
 upstream changes while keeping your own modifications on a separate branch:
@@ -28,6 +22,10 @@ upstream changes while keeping your own modifications on a separate branch:
 git clone https://github.com/<your-github-username>/mlcast
 cd mlcast
 
+# Install uv if not already installed
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# And install depencies, depending on whether you have a GPU available.
 # CPU
 uv sync
 
@@ -38,23 +36,9 @@ uv sync --extra gpu-cu128
 uv sync --extra gpu-cu130
 ```
 
-### PyPI release (pinned, stable)
-
-A tagged release is published to PyPI and can be installed with pip, but it may
-lag behind active development:
+Next you can jump to [using mlcast](#usage) or, if you intend to modify the code, setup the development toolchain as described below:
 
 ```bash
-pip install mlcast
-```
-
-### Developing
-
-If you intend to modify the code, clone locally as above and additionally
-install the pre-commit hooks:
-
-```bash
-# Install uv if not already installed
-curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Install dev dependencies
 uv sync --extra dev
@@ -62,6 +46,16 @@ uv sync --extra dev
 # Install the pre-commit git hook (runs checks automatically on every commit)
 uv run pre-commit install
 ```
+
+### PyPI release (pinned, stable)
+
+Tagged releases have been published to PyPI and can be installed with pip, but recent changes mean that the CLI and API have changed significantly since the last release (`v0.0.1` as of writing), so this is not recommended for users who want to follow the latest development.
+
+```bash
+pip install mlcast
+```
+
+Note: The usage instructions below don't match the most recent pypi release (`v0.0.1a4` as of writing).
 
 ## Usage
 
