@@ -1,4 +1,7 @@
+from types import SimpleNamespace
+
 import pytest
+from loguru import logger
 
 from mlcast.config import training_experiment, validate_config
 from mlcast.data.source_data_datasets import SourceDataPrecomputedSamplingDataset
@@ -24,6 +27,26 @@ def test_contract_2_spatial_divisibility() -> None:
 
     with pytest.raises(ValueError, match="Contract 2 violated:"):
         validate_config(cfg)
+
+
+def test_contract_1_and_2_warn_when_network_lacks_attrs() -> None:
+    """Verify Contracts 1 and 2 warn when the network lacks required attrs."""
+    cfg = training_experiment.as_buildable()
+    cfg.pl_module.network = SimpleNamespace()
+
+    messages: list[str] = []
+
+    def capture(message: object) -> None:
+        messages.append(message.record["message"])
+
+    sink_id = logger.add(capture)
+    try:
+        validate_config(cfg)
+    finally:
+        logger.remove(sink_id)
+
+    assert any("can't ensure network input_channels" in message for message in messages)
+    assert any("can't ensure dataset width is compatible" in message for message in messages)
 
 
 def test_contract_3_probabilistic_loss() -> None:

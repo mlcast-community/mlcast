@@ -192,13 +192,22 @@ from mlcast.config.fiddlers import use_random_sampler
 class HalfUNetNowcaster(nn.Module):
     def __init__(self, input_steps: int = 6, num_vars: int = 1):
         super().__init__()
+        self.input_steps = input_steps
+        self.num_vars = num_vars
         self.unet = HalfUNet(
             input_shape=(256, 256),
             in_channels=input_steps * num_vars,
             out_channels=num_vars,
             settings=fdl.Config(HalfUNet.settings_kls),
         )
-        self.num_vars = num_vars
+
+    @property
+    def input_channels(self) -> int:
+        # Externally, the HalfUNetNowcaster respects the required input shape structure
+        # (batch, input_steps, num_vars, H, W), even though the internal U-Net is channel-stacked.
+        # Adding this property allows the config consistency checks to verify that
+        # the dataset and model agree on the expected number of input channels.
+        return self.num_vars
 
     def forward(
         self,
@@ -315,11 +324,6 @@ concatenated along the channel dimension.
 
 ![ConvGruModel stochastic architecture](docs/architectures/convgru-stochastic.png)
 
-`input_steps` is directly available from the data config:
-```
-input_steps = dataset_factory.input_steps
-            = 6  (default)
-```
 
 ### Custom network interface
 

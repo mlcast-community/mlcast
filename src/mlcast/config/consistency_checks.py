@@ -12,6 +12,7 @@ applied and before handing the config off to the training orchestrator.
 """
 
 import fiddle as fdl
+from loguru import logger
 
 
 def validate_config(cfg: fdl.Config) -> None:
@@ -32,13 +33,17 @@ def validate_config(cfg: fdl.Config) -> None:
     pl_module = cfg.pl_module
 
     # Contract 1: Network input_channels == len(dataset_factory.standard_names)
-    # Only enforced when the network config exposes input_channels. Networks
-    # using a different parameter name (e.g. HalfUNet uses in_channels) are
-    # skipped — the caller is responsible for keeping those in sync.
+    # If the network does not expose input_channels, emit a warning because
+    # this contract cannot be checked.
     num_vars = len(dataset_factory.standard_names)
     try:
         net_input_channels = network.input_channels
     except AttributeError:
+        logger.warning(
+            "Warning: can't ensure network input_channels matches the number of dataset variables, "
+            "because network {} doesn't expose 'input_channels'.",
+            network.__class__.__name__,
+        )
         net_input_channels = None
     if net_input_channels is not None and net_input_channels != num_vars:
         raise ValueError(
@@ -47,12 +52,16 @@ def validate_config(cfg: fdl.Config) -> None:
         )
 
     # Contract 2: Dataset width must be divisible by 2 ** network.num_blocks
-    # Only enforced when the network config exposes num_blocks (e.g. ConvGruModel).
-    # External architectures that do not use a power-of-two downsampling factor
-    # (e.g. HalfUNet) will not have this parameter and are skipped.
+    # If the network does not expose num_blocks, emit a warning because this
+    # contract cannot be checked.
     try:
         num_blocks = network.num_blocks
     except AttributeError:
+        logger.warning(
+            "Warning: can't ensure dataset width is compatible with the network downsampling factor, "
+            "because network {} doesn't expose 'num_blocks'.",
+            network.__class__.__name__,
+        )
         num_blocks = None
     if num_blocks is not None:
         width = getattr(dataset_factory, "width", 256)
