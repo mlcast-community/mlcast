@@ -126,17 +126,14 @@ def test_data_module_ratio_splits() -> None:
     assert dm.train_dataset.kwargs["foo"] == "bar"
     train_start, train_end = dm.train_dataset.subset["time"]
     val_start, val_end = dm.val_dataset.subset["time"]
-    test_start, test_end = dm.test_dataset.subset["time"]
 
     assert train_start == str(time_index[0])
     assert train_end == str(time_index[49])
     assert val_start == str(time_index[50])
     assert val_end == str(time_index[69])
-    assert test_start == str(time_index[70])
-    assert test_end == str(time_index[99])
 
     assert dm.val_dataset.augment is False
-    assert dm.test_dataset.augment is False
+    assert dm.test_dataset is None
 
     train_dl = dm.train_dataloader()
     assert isinstance(train_dl, DataLoader)
@@ -237,6 +234,72 @@ def test_data_module_fraction_test_split_uses_explicit_fraction() -> None:
     test_start, test_end = dm.test_dataset.subset["time"]
     assert test_start == str(time_index[70])
     assert test_end == str(time_index[79])
+
+
+def test_data_module_fit_stage_creates_only_train_and_val() -> None:
+    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+    time_index = _make_time_index(100)
+
+    dm = SourceDataDataModule(
+        dataset_factory=dataset_factory,
+        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
+        batch_size=2,
+    )
+
+    with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
+        dm.setup(stage="fit")
+
+    assert dm.train_dataset is not None
+    assert dm.val_dataset is not None
+    assert dm.test_dataset is None
+
+
+def test_data_module_validate_stage_creates_only_val() -> None:
+    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+    time_index = _make_time_index(100)
+
+    dm = SourceDataDataModule(
+        dataset_factory=dataset_factory,
+        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
+        batch_size=2,
+    )
+
+    with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
+        dm.setup(stage="validate")
+
+    assert dm.train_dataset is None
+    assert dm.val_dataset is not None
+    assert dm.test_dataset is None
+
+
+def test_data_module_test_stage_creates_only_test() -> None:
+    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+    time_index = _make_time_index(100)
+
+    dm = SourceDataDataModule(
+        dataset_factory=dataset_factory,
+        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
+        batch_size=2,
+    )
+
+    with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
+        dm.setup(stage="test")
+
+    assert dm.train_dataset is None
+    assert dm.val_dataset is None
+    assert dm.test_dataset is not None
+
+
+def test_data_module_rejects_unknown_stage() -> None:
+    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+    dm = SourceDataDataModule(
+        dataset_factory=dataset_factory,
+        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
+        batch_size=2,
+    )
+
+    with pytest.raises(ValueError, match="Unsupported LightningDataModule setup stage"):
+        dm.setup(stage="predict")
 
 
 def test_data_module_logs_split_summary() -> None:

@@ -59,15 +59,42 @@ class SourceDataDataModule(pl.LightningDataModule):
         Datetime-mode splits are passed through unchanged, while ratio-mode
         splits are first resolved against the zarr coordinate values and then
         converted to inclusive coordinate ranges before dataset instantiation.
+        Dataset construction depends on the requested Lightning stage:
+
+        - ``"fit"`` builds train and validation datasets;
+        - ``"validate"`` builds only the validation dataset;
+        - ``"test"`` builds only the test dataset; and
+        - ``None`` builds all configured datasets.
 
         Parameters
         ----------
         stage : str | None, optional
-            Lightning stage hint such as ``"fit"`` or ``"test"``. The value
-            is accepted for framework compatibility and is otherwise unused.
+            Lightning stage hint controlling which datasets are constructed.
+
+        Raises
+        ------
+        ValueError
+            If ``stage`` is not one of ``None``, ``"fit"``, ``"validate"``,
+            or ``"test"``.
         """
+        if stage == "fit":
+            requested_splits = {"train", "val"}
+        elif stage == "validate":
+            requested_splits = {"val"}
+        elif stage == "test":
+            requested_splits = {"test"}
+        elif stage is None:
+            requested_splits = {"train", "val", "test"}
+        else:
+            raise ValueError(f"Unsupported LightningDataModule setup stage: {stage!r}")
+
         subset_per_split: dict[str, dict[str, Any] | None] = {
-            split_name: {} if any(split_name in coord_splits for coord_splits in self.splits.values()) else None
+            split_name: (
+                {}
+                if split_name in requested_splits
+                and any(split_name in coord_splits for coord_splits in self.splits.values())
+                else None
+            )
             for split_name in ("train", "val", "test")
         }
 
