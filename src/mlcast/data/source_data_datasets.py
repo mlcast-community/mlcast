@@ -20,6 +20,24 @@ from torch.utils.data import Dataset
 from mlcast.data.normalization import NORMALIZATION_REGISTRY
 
 
+def _time_range_to_index_slice(
+    zarr_path: str,
+    time_range: tuple[str, str],
+    storage_options: dict[str, Any] | None = None,
+) -> slice:
+    """Convert an inclusive ISO time range into a zarr integer slice."""
+    ds = xr.open_zarr(zarr_path, storage_options=storage_options)
+    time_values = ds.indexes["time"]
+    t_start = time_values.get_indexer([pd.Timestamp(time_range[0])], method="bfill")[0]
+    t_end = time_values.get_indexer([pd.Timestamp(time_range[1])], method="ffill")[0]
+    if t_start < 0 or t_end < 0:
+        raise ValueError(
+            f"time_range {time_range!r} falls entirely outside the zarr time coordinate "
+            f"({time_values[0]} - {time_values[-1]})."
+        )
+    return slice(int(t_start), int(t_end) + 1)
+
+
 class DatasetSample(TypedDict, total=False):
     """Typed dictionary returned by dataset ``__getitem__``.
 
@@ -181,8 +199,8 @@ class SourceDataDatasetBase(Dataset, ABC):
         """
         if self._ds is None:
             ds = xr.open_zarr(self._zarr_path, storage_options=self.storage_options)
-            if self._time_slice is not None:
-                ds = ds.isel(time=self._time_slice)
+            if self._time_index_slice is not None:
+                ds = ds.isel(time=self._time_index_slice)
             self._ds = ds
         return self._ds
 
@@ -318,8 +336,9 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
         If ``True``, use a fixed random seed (42) for reproducibility. Default is ``False``.
     augment : bool, optional
         If ``True``, apply random spatial augmentations (rotation, flips). Default is ``False``.
-    time_slice : slice or None, optional
-        Subset of row indices to use from the CSV for train/val splitting.
+    subset : dict or None, optional
+        Coordinate subsetting specification. Only ``{"time": (start, end)}``
+        is supported, where the time range is inclusive and uses ISO strings.
     width : int, optional
         Spatial width of each crop. Default is ``256``.
     height : int, optional
@@ -338,13 +357,23 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
         return_mask: bool = False,
         deterministic: bool = False,
         augment: bool = False,
-        time_slice: slice | None = None,
+        subset: dict[str, Any] | None = None,
         width: int = 256,
         height: int = 256,
         time_depth: int = 24,
         storage_options: dict[str, Any] | None = None,
     ) -> None:
-        self._time_slice: slice | None = None  # required by base ds property before super().__init__ opens store
+        if subset:
+            for key in subset:
+                if key != "time":
+                    raise NotImplementedError(
+                        f"subset key {key!r} is not supported. Only 'time' subsetting is currently implemented."
+                    )
+        time_range: tuple[str, str] | None = (subset or {}).get("time")
+        if time_range is not None:
+            self._time_index_slice: slice | None = _time_range_to_index_slice(zarr_path, time_range, storage_options)
+        else:
+            self._time_index_slice = None
         super().__init__(
             zarr_path=zarr_path,
             standard_names=standard_names,
@@ -359,8 +388,12 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
         )
 
         self.coords = pd.read_csv(csv_path).sort_values("t")
-        if time_slice is not None:
-            self.coords = self.coords.iloc[time_slice].reset_index(drop=True)
+        if self._time_index_slice is not None:
+            t_start = self._time_index_slice.start
+            t_stop = self._time_index_slice.stop
+            self.coords = self.coords[(self.coords["t"] >= t_start) & (self.coords["t"] < t_stop)].reset_index(
+                drop=True
+            )
 
         self.dt = time_depth
 
@@ -441,8 +474,9 @@ class SourceDataRandomSamplingDataset(SourceDataDatasetBase):
         If ``True``, use a fixed random seed (42) for reproducibility. Default is ``False``.
     augment : bool, optional
         If ``True``, apply random spatial augmentations (rotation, flips). Default is ``False``.
-    time_slice : slice or None, optional
-        Subset of time indices to use for train/val splitting.
+    subset : dict or None, optional
+        Coordinate subsetting specification. Only ``{"time": (start, end)}``
+        is supported, where the time range is inclusive and uses ISO strings.
     width : int, optional
         Spatial width of each crop. Default is ``256``.
     height : int, optional
@@ -462,14 +496,24 @@ class SourceDataRandomSamplingDataset(SourceDataDatasetBase):
         return_mask: bool = False,
         deterministic: bool = False,
         augment: bool = False,
-        time_slice: slice | None = None,
+        subset: dict[str, Any] | None = None,
         width: int = 256,
         height: int = 256,
         epoch_size: int = 1000,
         storage_options: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
-        self._time_slice = time_slice  # required by base ds property before super().__init__ opens store
+        if subset:
+            for key in subset:
+                if key != "time":
+                    raise NotImplementedError(
+                        f"subset key {key!r} is not supported. Only 'time' subsetting is currently implemented."
+                    )
+        time_range: tuple[str, str] | None = (subset or {}).get("time")
+        if time_range is not None:
+            self._time_index_slice: slice | None = _time_range_to_index_slice(zarr_path, time_range, storage_options)
+        else:
+            self._time_index_slice = None
         super().__init__(
             zarr_path=zarr_path,
             standard_names=standard_names,

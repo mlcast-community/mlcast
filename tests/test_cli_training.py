@@ -27,9 +27,7 @@ def test_cli_train_command(fp_test_dataset: Path, tmp_path: Path) -> None:
         "--config",
         "set:data.dataset_factory.standard_names=['rainfall_flux']",
         "--config",
-        "set:data.train_ratio=0.4",
-        "--config",
-        "set:data.val_ratio=0.3",  # Test ratio becomes 0.3 (30 steps > 18 required)
+        "set:data.splits={'time': {'train': 0.4, 'val': 0.3}}",
         "--config",
         "set:trainer.fast_dev_run=True",
         "--config",
@@ -61,8 +59,7 @@ def test_cli_train_from_yaml_config(fp_test_dataset: Path, tmp_path: Path) -> No
     use_random_sampler(cfg)
     cfg.data.dataset_factory.standard_names = ["rainfall_flux"]
     cfg.data.dataset_factory.zarr_path = str(fp_test_dataset.absolute())
-    cfg.data.train_ratio = 0.4
-    cfg.data.val_ratio = 0.3  # test ratio becomes 0.3 (30 steps > 18 required)
+    cfg.data.splits = {"time": {"train": 0.4, "val": 0.3}}
     cfg.trainer.fast_dev_run = True
     cfg.data.batch_size = 1
     cfg.data.num_workers = 0

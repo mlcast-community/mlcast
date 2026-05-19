@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 import torch
+import xarray as xr
 
 from mlcast.data.source_data_datasets import (
     SourceDataPrecomputedSamplingDataset,
@@ -59,15 +60,17 @@ def test_precomputed_sampling_dataset(fp_test_dataset: Path, mock_csv: str) -> N
     assert isinstance(target_mask_t, torch.Tensor)
 
 
-def test_precomputed_sampling_dataset_time_slice(fp_test_dataset: Path, mock_csv: str) -> None:
-    """Test that time_slice correctly slices the CSV."""
+def test_precomputed_sampling_dataset_time_subset(fp_test_dataset: Path, mock_csv: str) -> None:
+    """Test that subset correctly filters CSV rows by time range."""
+    zarr_ds = xr.open_zarr(str(fp_test_dataset))
+    time_index = zarr_ds.indexes["time"]
     ds = SourceDataPrecomputedSamplingDataset(
         zarr_path=str(fp_test_dataset),
         csv_path=mock_csv,
         standard_names=["rainfall_flux"],
         input_steps=2,
         forecast_steps=1,
-        time_slice=slice(0, 2),
+        subset={"time": (str(time_index[0]), str(time_index[8]))},
     )
     assert len(ds) == 2
 
@@ -115,18 +118,20 @@ def test_random_sampling_dataset(fp_test_dataset: Path) -> None:
     assert target_mask_t.shape == (forecast_steps, 1, 32, 32)
 
 
-def test_random_sampling_dataset_time_slice(fp_test_dataset: Path) -> None:
-    """Test that time_slice correctly slices the Zarr store."""
+def test_random_sampling_dataset_time_subset(fp_test_dataset: Path) -> None:
+    """Test that subset correctly slices the Zarr store."""
+    zarr_ds = xr.open_zarr(str(fp_test_dataset))
+    time_index = zarr_ds.indexes["time"]
     ds = SourceDataRandomSamplingDataset(
         zarr_path=str(fp_test_dataset),
         standard_names=["rainfall_flux"],
         input_steps=3,
         forecast_steps=2,
-        time_slice=slice(0, 50),
+        subset={"time": (str(time_index[0]), str(time_index[49]))},
         epoch_size=10,
     )
 
-    assert ds.max_t == 50  # Since it was sliced to 50
+    assert ds.max_t == 50
     assert len(ds) == 10
 
 

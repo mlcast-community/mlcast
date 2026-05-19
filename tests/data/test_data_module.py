@@ -1,64 +1,134 @@
 import functools
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 from torch.utils.data import DataLoader, Dataset
 
 from mlcast.data.source_data_datamodule import SourceDataDataModule
+from mlcast.data.splits import splitting_uses_fractions, splitting_uses_tuple_ranges, validate_splits
 
 
 class MockDataset(Dataset):
-    """Minimal dataset mock.
+    """Minimal dataset mock that records how it was constructed.
 
-    ``__len__`` returns the number of time steps covered by ``time_slice``
-    so that dataloader batch-count assertions work correctly.
+    ``__len__`` returns a fixed size so that dataloader batch-count assertions
+    work correctly.
     """
 
-    def __init__(self, zarr_path: str, time_slice: slice | None = None, augment: bool = False, **kwargs) -> None:
+    def __init__(
+        self,
+        zarr_path: str,
+        subset: dict | None = None,
+        augment: bool = False,
+        epoch_size: int = 100,
+        **kwargs,
+    ) -> None:
         self.zarr_path = zarr_path
-        self.time_slice = time_slice
+        self.subset = subset
         self.augment = augment
+        self.epoch_size = epoch_size
         self.kwargs = kwargs
 
     def __len__(self) -> int:
-        if self.time_slice is not None:
-            return self.time_slice.stop - self.time_slice.start
-        return 0
+        return self.epoch_size
 
     def __getitem__(self, idx: int) -> dict:
         return {"data": idx}
 
 
-def _mock_zarr(n_time: int) -> MagicMock:
-    """Return a mock xr.Dataset with a given time dimension size."""
+def _mock_zarr(time_index: pd.DatetimeIndex) -> MagicMock:
+    """Return a mock xr.Dataset with a given pandas DatetimeIndex for time."""
     mock_ds = MagicMock()
-    mock_ds.sizes = {"time": n_time}
+    mock_ds.indexes = {"time": time_index}
     return mock_ds
 
 
-def test_data_module_splits() -> None:
-    """Test DataModule chronological split boundaries.
+def _make_time_index(n: int, start: str = "2016-01-01", freq: str = "10min") -> pd.DatetimeIndex:
+    return pd.date_range(start=start, periods=n, freq=freq)
 
-    Uses 100 time steps, train_ratio=0.5, val_ratio=0.2:
-      train_end = int(100 * 0.5)      = 50
-      val_end   = 50 + int(100 * 0.2) = 70
-      test      = 70 to 100
-    """
+
+def test_validate_splits_ratio_mode() -> None:
+    validate_splits({"time": {"train": 0.7, "val": 0.15}})
+    validate_splits({"time": {"train": 0.7, "val": 0.15, "test": 0.15}})
+    validate_splits({"time": {"train": 0.7, "val": 0.15, "test": None}})
+
+
+def test_validate_splits_datetime_mode() -> None:
+    validate_splits(
+        {"time": {"train": ("2016-01-01", "2021-12-31"), "val": ("2022-01-01", "2023-12-31"), "test": None}}
+    )
+
+
+def test_validate_splits_missing_train() -> None:
+    with pytest.raises(ValueError, match="must contain 'train'"):
+        validate_splits({"time": {"val": 0.2}})
+
+
+def test_validate_splits_ratio_exceeds_one() -> None:
+    with pytest.raises(ValueError, match="sum to"):
+        validate_splits({"time": {"train": 0.8, "val": 0.3}})
+
+
+def test_validate_splits_ratio_requires_float_like_values() -> None:
+    with pytest.raises(ValueError, match="float-like"):
+        validate_splits({"time": {"train": "0.8", "val": 0.2}})
+
+    with pytest.raises(ValueError, match="float-like"):
+        validate_splits({"time": {"train": 0.8, "val": 0.1, "test": "0.1"}})
+
+
+def test_validate_splits_mixed_mode() -> None:
+    with pytest.raises(ValueError, match="mix"):
+        validate_splits({"time": {"train": 0.7, "val": ("2022-01-01", "2023-12-31")}})
+
+
+def test_validate_splits_datetime_missing_test() -> None:
+    with pytest.raises(ValueError, match="must contain 'test'"):
+        validate_splits({"time": {"train": ("2016-01-01", "2021-12-31"), "val": ("2022-01-01", "2023-12-31")}})
+
+
+def test_validate_splits_unknown_coord() -> None:
+    with pytest.raises(ValueError, match="Unknown coordinate"):
+        validate_splits({"space": {"train": 0.7, "val": 0.2}})
+
+
+def test_splitting_mode_helpers_require_consistent_values() -> None:
+    assert splitting_uses_fractions({"train": 0.7, "val": 0.2, "test": None})
+    assert not splitting_uses_fractions({"train": 0.7, "val": ("2022-01-01", "2022-12-31")})
+    assert splitting_uses_tuple_ranges(
+        {"train": ("2016-01-01", "2021-12-31"), "val": ("2022-01-01", "2023-12-31"), "test": None}
+    )
+    assert not splitting_uses_tuple_ranges({"train": object(), "val": object()})
+
+
+def test_data_module_ratio_splits() -> None:
+    """DataModule ratio mode passes correct time subsets to the factory."""
+    n = 100
+    time_index = _make_time_index(n)
     dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr", foo="bar")
 
-    dm = SourceDataDataModule(dataset_factory=dataset_factory, train_ratio=0.5, val_ratio=0.2, batch_size=2)
+    dm = SourceDataDataModule(
+        dataset_factory=dataset_factory, splits={"time": {"train": 0.5, "val": 0.2}}, batch_size=2
+    )
 
-    with patch("mlcast.data.source_data_datamodule.xr.open_zarr", return_value=_mock_zarr(100)):
+    with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
         dm.setup(stage="fit")
 
-    assert dm.train_dataset.time_slice == slice(0, 50)
     assert dm.train_dataset.augment is True
     assert dm.train_dataset.kwargs["foo"] == "bar"
+    train_start, train_end = dm.train_dataset.subset["time"]
+    val_start, val_end = dm.val_dataset.subset["time"]
+    test_start, test_end = dm.test_dataset.subset["time"]
 
-    assert dm.val_dataset.time_slice == slice(50, 70)
+    assert train_start == str(time_index[0])
+    assert train_end == str(time_index[49])
+    assert val_start == str(time_index[50])
+    assert val_end == str(time_index[69])
+    assert test_start == str(time_index[70])
+    assert test_end == str(time_index[99])
+
     assert dm.val_dataset.augment is False
-
-    assert dm.test_dataset.time_slice == slice(70, 100)
     assert dm.test_dataset.augment is False
 
     train_dl = dm.train_dataloader()
@@ -82,38 +152,54 @@ def test_data_module_invalid_dataset() -> None:
 def test_data_module_split_lengths_and_batches() -> None:
     """Test that dataset lengths and dataloader batch counts are correct after splitting.
 
-    Uses 240 time steps with a 1/2, 1/3, 1/6 train/val/test split and
-    batch_size=10, chosen so all splits divide evenly and expected batch
-    counts are easy to verify without rounding.
-
-    Split boundaries (computed independently per split to avoid float accumulation):
-      train_end = int(240 * 1/2)       = 120
-      val_end   = 120 + int(240 * 1/3) = 120 + 80 = 200
-      test      = 240 - 200            = 40
-
-    Expected dataset lengths and batch counts at batch_size=10:
-      train : 120 samples -> 12 batches
-      val   :  80 samples ->  8 batches
-      test  :  40 samples ->  4 batches
+    Dataloader batch counts are correct after splitting.
     """
     n_time = 240
     batch_size = 10
+    time_index = _make_time_index(n_time)
+    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr", epoch_size=10)
+
+    dm = SourceDataDataModule(
+        dataset_factory=dataset_factory,
+        splits={"time": {"train": 1 / 2, "val": 1 / 3}},
+        batch_size=batch_size,
+    )
+
+    with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
+        dm.setup()
+
+    assert len(dm.train_dataloader()) == 1
+    assert len(dm.val_dataloader()) == 1
+    assert len(dm.test_dataloader()) == 1
+
+
+def test_data_module_datetime_splits() -> None:
     dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
 
     dm = SourceDataDataModule(
         dataset_factory=dataset_factory,
-        train_ratio=1 / 2,
-        val_ratio=1 / 3,
-        batch_size=batch_size,
+        splits={
+            "time": {
+                "train": ("2016-01-01", "2021-12-31"),
+                "val": ("2022-01-01", "2023-12-31"),
+                "test": None,
+            }
+        },
+        batch_size=4,
     )
 
-    with patch("mlcast.data.source_data_datamodule.xr.open_zarr", return_value=_mock_zarr(n_time)):
+    dm.setup()
+
+    assert dm.train_dataset.subset == {"time": ("2016-01-01", "2021-12-31")}
+    assert dm.val_dataset.subset == {"time": ("2022-01-01", "2023-12-31")}
+    assert dm.test_dataset is None
+
+
+def test_data_module_unsupported_split_mode() -> None:
+    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+    dm = SourceDataDataModule(dataset_factory=dataset_factory)
+
+    dm.splits = {"time": {"train": object(), "val": object()}}
+
+    with pytest.raises(NotImplementedError, match="Unsupported split mode"):
         dm.setup()
-
-    assert len(dm.train_dataset) == 120, "train split should cover timesteps 0–120"
-    assert len(dm.val_dataset) == 80, "val split should cover timesteps 120–200"
-    assert len(dm.test_dataset) == 40, "test split should cover timesteps 200–240"
-
-    assert len(dm.train_dataloader()) == 12, "120 samples / batch_size 10 = 12 batches"
-    assert len(dm.val_dataloader()) == 8, "80 samples / batch_size 10 = 8 batches"
-    assert len(dm.test_dataloader()) == 4, "40 samples / batch_size 10 = 4 batches"

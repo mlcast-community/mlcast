@@ -86,6 +86,11 @@ def use_random_sampler(cfg: fdl.Config) -> None:
     )
 
 
+def use_ratio_splits(cfg: fdl.Config, train: float, val: float) -> None:
+    """Fiddler to set ratio-based train/val splits on the data module."""
+    cfg.data.splits = {"time": {"train": train, "val": val}}
+
+
 def use_anon_s3_dataset(cfg: fdl.Buildable, zarr_path: str, endpoint_url: str) -> None:
     """Configure the dataset factory to read anonymously from an S3 object store.
 
