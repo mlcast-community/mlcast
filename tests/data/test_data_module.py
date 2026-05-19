@@ -78,6 +78,13 @@ def test_validate_splits_ratio_requires_float_like_values() -> None:
         validate_splits({"time": {"train": 0.8, "val": 0.1, "test": "0.1"}})
 
 
+def test_validate_splits_warns_when_fraction_sum_is_not_one() -> None:
+    with patch("mlcast.data.splits.logger.warning") as mock_warning:
+        validate_splits({"time": {"train": 0.7, "val": 0.15}})
+
+    mock_warning.assert_called_once()
+
+
 def test_validate_splits_mixed_mode() -> None:
     with pytest.raises(ValueError, match="mix"):
         validate_splits({"time": {"train": 0.7, "val": ("2022-01-01", "2023-12-31")}})
@@ -109,7 +116,7 @@ def test_data_module_ratio_splits() -> None:
     dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr", foo="bar")
 
     dm = SourceDataDataModule(
-        dataset_factory=dataset_factory, splits={"time": {"train": 0.5, "val": 0.2}}, batch_size=2
+        dataset_factory=dataset_factory, splits={"time": {"train": 0.5, "val": 0.2, "test": 0.3}}, batch_size=2
     )
 
     with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
@@ -143,10 +150,28 @@ def test_data_module_invalid_dataset() -> None:
         def __call__(self, **kwargs) -> Dataset:
             return MagicMock(spec=Dataset)
 
-    dm = SourceDataDataModule(dataset_factory=_NoZarrPathFactory())
+    dm = SourceDataDataModule(dataset_factory=_NoZarrPathFactory(), splits={"time": {"train": 0.7, "val": 0.15}})
 
     with pytest.raises((AttributeError, KeyError)):
         dm.setup()
+
+
+def test_data_module_fraction_splits_without_test_do_not_create_test_dataset() -> None:
+    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+    time_index = _make_time_index(100)
+
+    dm = SourceDataDataModule(
+        dataset_factory=dataset_factory,
+        splits={"time": {"train": 0.5, "val": 0.2}},
+        batch_size=2,
+    )
+
+    with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
+        dm.setup()
+
+    assert dm.train_dataset is not None
+    assert dm.val_dataset is not None
+    assert dm.test_dataset is None
 
 
 def test_data_module_split_lengths_and_batches() -> None:
@@ -161,7 +186,7 @@ def test_data_module_split_lengths_and_batches() -> None:
 
     dm = SourceDataDataModule(
         dataset_factory=dataset_factory,
-        splits={"time": {"train": 1 / 2, "val": 1 / 3}},
+        splits={"time": {"train": 1 / 2, "val": 1 / 3, "test": 1 / 6}},
         batch_size=batch_size,
     )
 
@@ -195,9 +220,28 @@ def test_data_module_datetime_splits() -> None:
     assert dm.test_dataset is None
 
 
+def test_data_module_fraction_test_split_uses_explicit_fraction() -> None:
+    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+    time_index = _make_time_index(100)
+
+    dm = SourceDataDataModule(
+        dataset_factory=dataset_factory,
+        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
+        batch_size=2,
+    )
+
+    with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
+        dm.setup()
+
+    assert dm.test_dataset is not None
+    test_start, test_end = dm.test_dataset.subset["time"]
+    assert test_start == str(time_index[70])
+    assert test_end == str(time_index[79])
+
+
 def test_data_module_unsupported_split_mode() -> None:
     dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
-    dm = SourceDataDataModule(dataset_factory=dataset_factory)
+    dm = SourceDataDataModule(dataset_factory=dataset_factory, splits={"time": {"train": 0.7, "val": 0.15}})
 
     dm.splits = {"time": {"train": object(), "val": object()}}
 

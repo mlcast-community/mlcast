@@ -124,7 +124,7 @@ def _patch_cfg(cfg: fdl.Config, fp_dataset: Path, tmp_path: Path) -> None:
     set_variables(cfg, standard_names=["rainfall_flux"])
     # Switch to the on-the-fly random sampler so no pre-computed CSV is needed.
     use_random_sampler(cfg)
-    cfg.data.splits = {"time": {"train": 0.4, "val": 0.3}}
+    cfg.data.splits = {"time": {"train": 0.4, "val": 0.3, "test": 0.3}}
     cfg.trainer.fast_dev_run = True
     cfg.data.batch_size = 1
     cfg.data.num_workers = 0

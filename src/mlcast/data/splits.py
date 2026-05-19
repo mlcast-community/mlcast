@@ -2,8 +2,8 @@
 Utilities to facilitate dataset splitting based on coordinate values, supporting two modes of specification:
 
 1. Fraction mode: each split is defined by a fraction of the total coordinate
-range (e.g., 0.7 for training, 0.2 for validation, and the remainder for
-testing). The fractions are resolved into coordinate value range tuples by inspecting
+range (e.g., 0.7 for training, 0.2 for validation, and 0.1 for testing).
+The fractions are resolved into coordinate value range tuples by inspecting
 the coordinate values of the source dataset.
 
 2. Tuple-range mode: each split is defined by an explicit (start, end) tuple of
@@ -17,6 +17,7 @@ from numbers import Real
 from typing import Any
 
 import xarray as xr
+from loguru import logger
 from torch.utils.data import Dataset
 
 _SPLIT_NAMES = frozenset({"train", "val", "test"})
@@ -134,6 +135,12 @@ def validate_splits(splits: dict[str, dict[str, Any]]) -> None:
                 ratio_sum += test_val
             if ratio_sum > 1.0 + 1e-9:
                 raise ValueError(f"Split fractions in splits[{coord!r}] sum to {ratio_sum:.4f}, which exceeds 1.0.")
+            if abs(ratio_sum - 1.0) > 1e-9:
+                logger.warning(
+                    "Split fractions in splits[{}] sum to {:.4f}, not 1.0. Any unallocated remainder will be unused.",
+                    coord,
+                    ratio_sum,
+                )
         elif splitting_uses_tuple_ranges(coord_splits):
             if "test" not in coord_splits:
                 raise ValueError(
@@ -169,13 +176,13 @@ def compute_split_ranges_from_splitting_ratios(
         Coordinate name to split. Currently this is expected to be ``"time"``.
     coord_splits : dict[str, Any]
         Fraction-mode split configuration for a single coordinate. Must contain
-        float values for ``"train"`` and ``"val"``.
+        float values for ``"train"`` and ``"val"``. ``"test"`` is optional;
+        when omitted or set to ``None``, no test split range is returned.
 
     Returns
     -------
     dict[str, tuple[str, str]]
-        Inclusive ``(start, end)`` coordinate ranges for the ``train``,
-        ``val``, and ``test`` splits.
+        Inclusive ``(start, end)`` coordinate ranges for the configured splits.
     """
     zarr_path = getattr(dataset_factory, "zarr_path", None) or dataset_factory.keywords["zarr_path"]
     storage_options = getattr(dataset_factory, "storage_options", None) or dataset_factory.keywords.get(
@@ -188,8 +195,14 @@ def compute_split_ranges_from_splitting_ratios(
     train_end = int(n * coord_splits["train"])
     val_end = train_end + int(n * coord_splits["val"])
 
-    return {
+    split_ranges = {
         "train": (str(coord_vals[0]), str(coord_vals[train_end - 1])),
         "val": (str(coord_vals[train_end]), str(coord_vals[val_end - 1])),
-        "test": (str(coord_vals[val_end]), str(coord_vals[n - 1])),
     }
+
+    test_fraction = coord_splits.get("test")
+    if isinstance(test_fraction, Real) and not isinstance(test_fraction, bool):
+        test_end = val_end + int(n * test_fraction)
+        split_ranges["test"] = (str(coord_vals[val_end]), str(coord_vals[test_end - 1]))
+
+    return split_ranges

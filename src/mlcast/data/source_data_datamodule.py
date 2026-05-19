@@ -31,7 +31,7 @@ class SourceDataDataModule(pl.LightningDataModule):
     dataset_factory : Callable[..., Dataset]
         A factory function (e.g., ``fdl.Partial``) that returns a Dataset instance.
         It must accept ``subset`` and ``augment`` as keyword arguments.
-    splits : dict of {str: dict}, optional
+    splits : dict of {str: dict}
         Nested mapping ``{coord: {split_name: value, ...}, ...}`` describing
         train/val/test subsets. Currently only the ``time`` coordinate is
         supported. Ratio mode uses float fractions, while datetime mode uses
@@ -44,12 +44,12 @@ class SourceDataDataModule(pl.LightningDataModule):
     def __init__(
         self,
         dataset_factory: Callable[..., Dataset],
-        splits: dict[str, dict[str, Any]] | None = None,
+        splits: dict[str, dict[str, Any]],
         **dataloader_kwargs: Any,
     ) -> None:
         super().__init__()
         self.dataset_factory = dataset_factory
-        self.splits = splits if splits is not None else {"time": {"train": 0.70, "val": 0.15}}
+        self.splits = splits
         self.dataloader_kwargs = dataloader_kwargs
         validate_splits(self.splits)
 
@@ -68,9 +68,8 @@ class SourceDataDataModule(pl.LightningDataModule):
             is accepted for framework compatibility and is otherwise unused.
         """
         subset_per_split: dict[str, dict[str, Any] | None] = {
-            "train": {},
-            "val": {},
-            "test": {},
+            split_name: {} if any(split_name in coord_splits for coord_splits in self.splits.values()) else None
+            for split_name in ("train", "val", "test")
         }
 
         for coord, coord_splits in self.splits.items():
