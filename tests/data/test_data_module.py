@@ -239,6 +239,25 @@ def test_data_module_fraction_test_split_uses_explicit_fraction() -> None:
     assert test_end == str(time_index[79])
 
 
+def test_data_module_logs_split_summary() -> None:
+    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+    time_index = _make_time_index(100)
+
+    dm = SourceDataDataModule(
+        dataset_factory=dataset_factory,
+        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
+        batch_size=2,
+    )
+
+    with (
+        patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)),
+        patch("mlcast.data.source_data_datamodule.logger.info") as mock_info,
+    ):
+        dm.setup()
+
+    assert mock_info.call_count == 4
+
+
 def test_data_module_unsupported_split_mode() -> None:
     dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
     dm = SourceDataDataModule(dataset_factory=dataset_factory, splits={"time": {"train": 0.7, "val": 0.15}})

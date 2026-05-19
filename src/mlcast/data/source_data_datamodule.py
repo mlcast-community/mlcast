@@ -7,9 +7,8 @@ dataset factory.
 from collections.abc import Callable
 from typing import Any
 
-import fiddle as fdl
 import pytorch_lightning as pl
-import xarray as xr
+from loguru import logger
 from torch.utils.data import DataLoader, Dataset
 
 from mlcast.data.splits import (
@@ -111,6 +110,17 @@ class SourceDataDataModule(pl.LightningDataModule):
                     self.dataset_factory(subset=subset, augment=augment_flags[split]),
                 )
 
+        logger.info("{}.setup() complete, containing:", self.__class__.__name__)
+        for split in ("train", "val", "test"):
+            dataset = getattr(self, f"{split}_dataset", None)
+            if dataset is not None:
+                logger.info(
+                    "  {:5s}: {:>6d} samples, subset={}",
+                    split,
+                    len(dataset),
+                    subset_per_split[split],
+                )
+
     def train_dataloader(self) -> DataLoader:
         """Return the training DataLoader."""
         return DataLoader(self.train_dataset, shuffle=True, **self.dataloader_kwargs)
@@ -122,32 +132,3 @@ class SourceDataDataModule(pl.LightningDataModule):
     def test_dataloader(self) -> DataLoader:
         """Return the test DataLoader."""
         return DataLoader(self.test_dataset, shuffle=False, **self.dataloader_kwargs)
-
-
-def count_split_samples(cfg: fdl.Config) -> dict[str, Any]:
-    """Return dataset counts plus time extent for a built experiment config."""
-    data_module: SourceDataDataModule = fdl.build(cfg.data)
-
-    zarr_path = (
-        getattr(data_module.dataset_factory, "zarr_path", None) or data_module.dataset_factory.keywords["zarr_path"]
-    )
-    storage_options = getattr(
-        data_module.dataset_factory, "storage_options", None
-    ) or data_module.dataset_factory.keywords.get("storage_options")
-    ds = xr.open_zarr(zarr_path, storage_options=storage_options)
-    time_values = ds.indexes["time"]
-
-    data_module.setup()
-    counts: dict[str, int] = {}
-    for split in ("train", "val", "test"):
-        dataset = getattr(data_module, f"{split}_dataset", None)
-        if dataset is not None:
-            counts[split] = len(dataset)
-
-    return {
-        "samples": counts,
-        "zarr_tmin": str(time_values[0]),
-        "zarr_tmax": str(time_values[-1]),
-        "zarr_nsteps": len(time_values),
-        "splits": data_module.splits,
-    }
