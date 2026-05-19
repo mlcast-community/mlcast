@@ -1,34 +1,40 @@
-"""Simple training script for MLCast."""
+"""Simple training script for MLCast using Fiddle configuration.
 
-from pathlib import Path
+This script shows the programmatic API for configuring and running
+experiments. For CLI usage with arbitrary overrides, use::
 
-import fire
-from pytorch_lightning import Trainer
-from torch import nn
+    python -m mlcast train \\
+        --config config:convgru_experiment \\
+        --config set:data.zarr_path=/path/to/data.zarr \\
+        --config set:data.csv_path=/path/to/sampled.csv \\
+        --config set:data.batch_size=32 \\
+        --config set:trainer.max_epochs=50
+"""
 
-from mlcast.data.zarr_datamodule import ZarrDataModule
-from mlcast.models.base import NowcastingLightningModule
-from mlcast.modules import ConvGRU
+import fiddle as fdl
+
+from mlcast.configs import convgru_experiment
 
 
-def main(
-    dataset_dir: str,
-    variable_name: str,
-) -> None:
-    """Sample training script for MLCast."""
-    model = NowcastingLightningModule(
-        net=ConvGRU(),
-        loss=nn.MSELoss(),
+def main():
+    # Get the config graph — all parameters are overridable via dot-access
+    cfg = convgru_experiment.as_buildable(
+        zarr_path="/path/to/data.zarr",
+        csv_path="/path/to/sampled.csv",
+        variable_name="RR",
     )
-    trainer = Trainer()
-    radklim = ZarrDataModule(
-        dataset_dir=Path(
-            dataset_dir,
-        ),
-        variable_name=variable_name,
-    )
-    trainer.fit(model, datamodule=radklim)
+
+    # Override any nested parameter before building
+    cfg.data.batch_size = 32
+    cfg.data.num_workers = 16
+    cfg.pl_module.num_blocks = 4
+    cfg.pl_module.ensemble_size = 4
+    cfg.trainer.max_epochs = 50
+
+    # Build all objects and run training + testing
+    experiment = fdl.build(cfg)
+    experiment.run()
 
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    main()
