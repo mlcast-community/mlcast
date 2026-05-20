@@ -261,7 +261,9 @@ class SourceDataDatasetBase(Dataset, ABC):
         if self.return_mask:
             target_mask_t = torch.from_numpy((~np.isnan(data[self.input_steps :])).astype(np.float32))
 
-        data = np.nan_to_num(data, nan=-1.0)
+        # source data may be float64, but the model and the rest of the
+        # training pipeline operate in float32.
+        data = np.nan_to_num(data, nan=-1.0).astype(np.float32)
         data_t = torch.from_numpy(data)
 
         input_t = data_t[: self.input_steps]
@@ -413,7 +415,9 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
             norm_func = NORMALIZATION_REGISTRY[std_name]
             channels.append(norm_func(da_var.values))
 
-        data = np.swapaxes(np.stack(channels, axis=0), 0, 1)
+        # swapaxes returns a view; make it contiguous and float32 before
+        # handing it to _build_sample()/torch.from_numpy().
+        data = np.ascontiguousarray(np.swapaxes(np.stack(channels, axis=0), 0, 1), dtype=np.float32)
         return self._build_sample(data)
 
 
@@ -540,5 +544,7 @@ class SourceDataRandomSamplingDataset(SourceDataDatasetBase):
             norm_func = NORMALIZATION_REGISTRY[std_name]
             channels.append(norm_func(da_var.values))
 
-        data = np.swapaxes(np.stack(channels, axis=0), 0, 1)
+        # swapaxes returns a view; make it contiguous and float32 before
+        # handing it to _build_sample()/torch.from_numpy().
+        data = np.ascontiguousarray(np.swapaxes(np.stack(channels, axis=0), 0, 1), dtype=np.float32)
         return self._build_sample(data)
