@@ -6,6 +6,6 @@ dist/
 .venv/
 logs/
 .pytest_cache/
-data/
+/data/
 mlruns/
 MagicMock/
