@@ -75,8 +75,7 @@ def training_experiment() -> Experiment:
 
     data = SourceDataDataModule(
         dataset_factory=dataset_factory,
-        train_ratio=0.70,
-        val_ratio=0.15,
+        splits={"time": {"train": 0.70, "val": 0.15, "test": 0.15}},
         batch_size=16,
         num_workers=8,
         pin_memory=True,
