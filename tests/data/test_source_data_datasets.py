@@ -116,6 +116,9 @@ def test_random_sampling_dataset(fp_test_dataset: Path) -> None:
     assert input_t.shape == (input_steps, 1, 32, 32)
     assert target_t.shape == (forecast_steps, 1, 32, 32)
     assert target_mask_t.shape == (forecast_steps, 1, 32, 32)
+    assert input_t.dtype == torch.float32
+    assert target_t.dtype == torch.float32
+    assert target_mask_t.dtype == torch.float32
 
 
 def test_random_sampling_dataset_time_subset(fp_test_dataset: Path) -> None:
