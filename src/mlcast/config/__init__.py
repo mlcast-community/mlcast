@@ -4,7 +4,9 @@ This package defines the configuration schemas, validation constraints,
 and runtime orchestration logic for `mlcast`.
 """
 
-from .base import Experiment, training_experiment
+from .archetype.convgru import convgru_training_experiment
+from .archetype.latent_diffusion import LatentDiffusionTrainingExperiment, latent_diffusion_experiment
+from .base import Experiment
 from .consistency_checks import validate_config
 from .fiddlers import (
     set_variables,
@@ -19,7 +21,9 @@ from .orchestrator import train_from_config
 
 __all__ = [
     "Experiment",
-    "training_experiment",
+    "LatentDiffusionTrainingExperiment",
+    "convgru_training_experiment",
+    "latent_diffusion_experiment",
     "validate_config",
     "train_from_config",
     "load_yaml_config",

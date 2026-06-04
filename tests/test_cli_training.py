@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fiddle._src.experimental.yaml_serialization import dump_yaml
 
-from mlcast.config import training_experiment
+from mlcast.config import convgru_training_experiment
 from mlcast.config.fiddlers import use_random_sampler
 
 
@@ -21,11 +21,13 @@ def test_cli_train_command(fp_test_dataset: Path, tmp_path: Path) -> None:
         "mlcast",
         "train",
         "--config",
+        "config:convgru_training_experiment",
+        "--config",
         "fiddler:use_random_sampler",
         "--config",
-        f"set:data.dataset_factory.zarr_path='{fp_test_dataset.absolute()}'",
+        f"set:data.sequence_dataset_factory.zarr_path='{fp_test_dataset.absolute()}'",
         "--config",
-        "set:data.dataset_factory.standard_names=['rainfall_flux']",
+        "set:data.sequence_dataset_factory.standard_names=['rainfall_flux']",
         "--config",
         "set:data.splits={'time': {'train': 0.4, 'val': 0.3, 'test': 0.3}}",
         "--config",
@@ -54,11 +56,11 @@ def test_cli_train_from_yaml_config(fp_test_dataset: Path, tmp_path: Path) -> No
     the dataset path) before dumping to YAML, so the subprocess call needs no
     additional --config flags. This exercises the pure load-from-YAML path.
     """
-    cfg = training_experiment.as_buildable()
+    cfg = convgru_training_experiment.as_buildable()
     # Switch to random sampler (no CSV required) and use the correct variable name
     use_random_sampler(cfg)
-    cfg.data.dataset_factory.standard_names = ["rainfall_flux"]
-    cfg.data.dataset_factory.zarr_path = str(fp_test_dataset.absolute())
+    cfg.data.sequence_dataset_factory.standard_names = ["rainfall_flux"]
+    cfg.data.sequence_dataset_factory.zarr_path = str(fp_test_dataset.absolute())
     cfg.data.splits = {"time": {"train": 0.4, "val": 0.3, "test": 0.3}}
     cfg.trainer.fast_dev_run = True
     cfg.data.batch_size = 1

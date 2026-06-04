@@ -13,7 +13,7 @@ from typing import Any
 import fiddle as fdl
 import pytest
 
-from mlcast.config.fiddlers import set_variables, use_random_sampler
+from mlcast.config.fiddlers import _iter_experiment_configs, set_variables, use_random_sampler
 
 _README = Path(__file__).parent.parent / "README.md"
 
@@ -111,24 +111,43 @@ def _patch_cfg(cfg: fdl.Config, fp_dataset: Path, tmp_path: Path) -> None:
     Uses the ``set_variables`` fiddler (rather than direct assignment) so that
     ``network.input_channels`` is kept in sync with ``standard_names``.
 
+    Handles both flat ``Experiment`` configs and nested containers like
+    ``LatentDiffusionTrainingExperiment`` by finding all ``Experiment`` sub-configs
+    in the tree and patching each one.
+
     Parameters
     ----------
     cfg : fdl.Config
-        The Fiddle configuration graph to mutate in-place.
+        The Fiddle configuration to mutate in-place.
     fp_dataset : Path
         Local path to the cached test zarr store.
     tmp_path : Path
         Pytest-provided temporary directory for trainer outputs.
     """
-    cfg.data.dataset_factory.zarr_path = str(fp_dataset.absolute())
-    set_variables(cfg, standard_names=["rainfall_flux"])
-    # Switch to the on-the-fly random sampler so no pre-computed CSV is needed.
-    use_random_sampler(cfg)
-    cfg.data.splits = {"time": {"train": 0.4, "val": 0.3, "test": 0.3}}
-    cfg.trainer.fast_dev_run = True
-    cfg.data.batch_size = 1
-    cfg.data.num_workers = 0
-    cfg.trainer.default_root_dir = str(tmp_path)
+    for exp_cfg in _iter_experiment_configs(cfg):
+        _patch_single_experiment(exp_cfg, fp_dataset, tmp_path)
+
+
+def _patch_single_experiment(exp_cfg: fdl.Config, fp_dataset: Path, tmp_path: Path) -> None:
+    """Apply lightweight training overrides to a single ``Experiment`` config.
+
+    Parameters
+    ----------
+    exp_cfg : fdl.Config
+        A single ``Experiment`` config node (has ``data``, ``trainer``).
+    fp_dataset : Path
+        Local path to the cached test zarr store.
+    tmp_path : Path
+        Pytest-provided temporary directory for trainer outputs.
+    """
+    exp_cfg.data.sequence_dataset_factory.zarr_path = str(fp_dataset.absolute())
+    set_variables(exp_cfg, standard_names=["rainfall_flux"])
+    use_random_sampler(exp_cfg)
+    exp_cfg.data.splits = {"time": {"train": 0.4, "val": 0.3, "test": 0.3}}
+    exp_cfg.trainer.fast_dev_run = True
+    exp_cfg.data.batch_size = 1
+    exp_cfg.data.num_workers = 0
+    exp_cfg.trainer.default_root_dir = str(tmp_path)
 
 
 def _inject_patch(snippet: str) -> ast.Module:

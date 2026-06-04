@@ -126,7 +126,8 @@ def train_from_config(cfg: fdl.Config) -> None:
     Parameters
     ----------
     cfg : fdl.Config
-        Fiddle configuration as returned by `training_experiment`.
+        Fiddle configuration as returned by an included auto-config factory such
+        as `convgru_training_experiment`.
     """
     validate_config(cfg)
 

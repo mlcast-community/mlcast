@@ -67,12 +67,18 @@ reproduce runs exactly from a saved YAML file.
 
 ### Configuration model
 
-Training in mlcast is currently built around a single base configuration
-function, [`training_experiment`](src/mlcast/config/base.py), which defines the
-default ConvGRU ensemble nowcasting setup: dataset, data module, network,
-Lightning module, and trainer. Rather than writing a new config from scratch,
-the intended workflow is to start from this base and apply targeted
-modifications:
+mlcast ships with two included configuration functions:
+
+- [`convgru_training_experiment`](src/mlcast/config/archetype/convgru.py) — defines a
+  single-stage ConvGRU ensemble nowcasting setup (dataset, data module, network,
+  Lightning module, trainer).
+- [`latent_diffusion_experiment`](src/mlcast/config/archetype/latent_diffusion.py) — defines a
+  two-stage latent diffusion setup: stage 1 trains an autoencoder on reconstruction
+  windows, stage 2 trains a latent diffusion model on the same autoencoder's
+  latent space.
+
+Rather than writing a new config from scratch, the intended workflow is to
+start from one of these configs and apply targeted modifications:
 
 - **`set:` overrides** — change a single scalar parameter (e.g. batch size,
   learning rate, number of epochs)
@@ -82,32 +88,62 @@ modifications:
 - **direct graph edits** (Python API only) — replace a sub-object entirely,
   for example swapping in a different network architecture
 
-Any combination of these can be layered on top of the base config, and the
+Any combination of these can be layered on top of the selected config, and the
 fully resolved config is always saved to YAML alongside the training logs so
 runs can be reproduced exactly.
 
-The diagram below shows the full default config graph as built by
-[`training_experiment`](src/mlcast/config/base.py):
+The diagrams below show the full included config graphs.
 
-![training_experiment config graph](docs/config_diagram.svg)
+**convgru_training_experiment:**
+
+![convgru_training_experiment config graph](docs/config_diagram.svg)
+
+**latent_diffusion_experiment:**
+
+![latent_diffusion_experiment config graph](docs/latent_diffusion_config_diagram.svg)
+
+### Design roles
+
+mlcast separates pure architectures from task-level training wrappers.
+
+- `src/mlcast/models/`
+  Pure `torch.nn.Module` architectures and supporting components. These classes
+  define tensor transformations and reusable building blocks, but they do not
+  decide how training is run or which parameters are optimized.
+- `src/mlcast/modules/`
+  Task-level Lightning modules. These classes define what batch structure a
+  task consumes, what loss is computed, which parameters are optimized, and how
+  inference/prediction is exposed.
+
+In other words, architectures answer "how does this tensor get transformed?",
+while task modules answer "what is being trained, against what target, and over
+which parameters?"
+
+This distinction matters especially for latent diffusion. The diffusion
+architecture itself lives under `models/`, while the corresponding task module
+owns the trained autoencoder reuse policy, decides that only diffusion-network
+parameters are optimized, computes diffusion loss in latent space, and handles
+decoded forecast inference.
 
 ### Command-line interface
 
 Install the package and run:
 
 ```bash
-mlcast train
+# Single-stage ConvGRU nowcasting
+mlcast train --config config:convgru_training_experiment
+# Two-stage latent diffusion
+
+mlcast train --config config:latent_diffusion_experiment
 ```
 
-This trains with the built-in [`training_experiment`](src/mlcast/config/base.py) defaults. All parameters
-are controlled via `--config` flags:
+All parameters are controlled via `--config` flags:
 
 | Prefix | Purpose | Example |
 |--------|---------|---------|
-| *(none)* | Use the built-in default config | `mlcast train` |
+| `config:` | Select an included `@auto_config` function | `--config config:convgru_training_experiment` or `--config config:latent_diffusion_experiment` |
 | `set:` | Override a single parameter | `--config set:data.batch_size=32` |
 | `fiddler:` | Apply a semantic mutator (multi-param change) | `--config fiddler:use_random_sampler` |
-| `config:` | Switch to a different `@auto_config` function | `--config=config:my_experiment` |
 | `path/to/config.yaml` | Load a previously saved config | `--config saved.yaml` |
 
 Multiple `--config` flags are applied in order and can be combined freely.
@@ -117,11 +153,13 @@ Multiple `--config` flags are applied in order and can be combined freely.
 ```bash
 # Override dataset path and batch size
 mlcast train \
-    --config set:data.dataset_factory.zarr_path=/data/radar.zarr \
+    --config config:convgru_training_experiment \
+    --config set:data.sequence_dataset_factory.zarr_path=/data/radar.zarr \
     --config set:data.batch_size=32
 
 # Switch to random sampler and log to MLflow
 mlcast train \
+    --config config:convgru_training_experiment \
     --config fiddler:use_random_sampler \
     --config fiddler:use_mlflow_logger
 
@@ -130,8 +168,13 @@ mlcast train \
     --config logs/mlcast/version_0/config.yaml \
     --config set:trainer.max_epochs=50
 
+# Run two-stage latent diffusion training with a shorter diffusion schedule
+
+    --config config:latent_diffusion_experiment \
+    --config set:stage2.pl_module.diffusion_net.scheduler.timesteps=20
+
 # Inspect the fully resolved config without starting training
-mlcast train --config fiddler:use_random_sampler --print_config_and_exit
+mlcast train --config config:convgru_training_experiment --config fiddler:use_random_sampler --print_config_and_exit
 ```
 
 Run `mlcast train --help` for a full list of examples and available fiddlers.
@@ -141,14 +184,14 @@ Run `mlcast train --help` for a full list of examples and available fiddlers.
 The Python API gives you full programmatic control over the config graph before
 anything is instantiated.
 
-**Run the default experiment with tweaks:**
+**Run the included ConvGRU experiment with tweaks:**
 
 ```python
 import fiddle as fdl
-from mlcast.config import training_experiment, train_from_config
+from mlcast.config import convgru_training_experiment, train_from_config
 from mlcast.config.fiddlers import use_random_sampler
 
-cfg = training_experiment.as_buildable()  # returns a fdl.Config graph — see src/mlcast/config/base.py
+cfg = convgru_training_experiment.as_buildable()  # returns a fdl.Config graph — see src/mlcast/config/archetype/convgru.py
 
 # Apply a fiddler to switch the dataset sampler
 use_random_sampler(cfg)
@@ -159,6 +202,24 @@ cfg.trainer.max_epochs = 50
 
 # Validates cross-parameter contracts, builds all objects, persists config
 # YAML to the active logger, then calls trainer.fit() + trainer.test()
+train_from_config(cfg)
+```
+
+**Run the included latent diffusion experiment with tweaks:**
+
+```python
+from mlcast.config import latent_diffusion_experiment, train_from_config
+from mlcast.config.fiddlers import use_random_sampler
+
+cfg = latent_diffusion_experiment.as_buildable()
+
+# Applied once — @applies_to_experiments walks both stages automatically
+use_random_sampler(cfg)
+
+# Override the diffusion noise schedule
+cfg.stage2.pl_module.diffusion_net.scheduler.timesteps = 20
+
+# train_from_config applies to the full two-stage experiment
 train_from_config(cfg)
 ```
 
@@ -173,7 +234,7 @@ As an example, here is how to wrap an
 U-Net) to satisfy the interface.  The wrapper channel-stacks the past frames
 and runs the U-Net autoregressively for each requested forecast step:
 
-> **Note** — `input_steps` equals `dataset_factory.input_steps` (6 by
+> **Note** — `input_steps` equals the forecasting data module's `input_steps` (6 by
 > default) and is directly readable from the config graph before building.
 
 ```python
@@ -183,16 +244,18 @@ import torch
 import torch.nn as nn
 from jaxtyping import Float
 from mfai.torch.models import HalfUNet
-from mlcast.config import training_experiment, train_from_config
+from mlcast.config import convgru_training_experiment, train_from_config
 from mlcast.config.fiddlers import use_random_sampler
 
-# Minimal adapter: channel-stack past frames → HalfUNet → one step at a time.
-# NowcastLightningModule calls network(x, steps=N, ensemble_size=M), so any
-# custom network must accept those keyword arguments.
+# Minimal adapter: channel-stack past frames -> HalfUNet -> one step at a time.
+# The forecasting contract fixes input_steps, forecast_steps, and ensemble_size
+# at model initialization; this minimal deterministic adapter exposes one
+# ensemble member and OutputSpaceForecastingTaskModule calls network(x).
 class HalfUNetNowcaster(nn.Module):
-    def __init__(self, input_steps: int = 6, num_vars: int = 1):
+    def __init__(self, input_steps: int = 6, forecast_steps: int = 12, num_vars: int = 1):
         super().__init__()
         self.input_steps = input_steps
+        self.forecast_steps = forecast_steps
         self.num_vars = num_vars
         self.unet = HalfUNet(
             input_shape=(256, 256),
@@ -202,38 +265,41 @@ class HalfUNetNowcaster(nn.Module):
         )
 
     @property
+    def ensemble_size(self) -> int:
+        return 1
+
+    @property
     def input_channels(self) -> int:
-        # Externally, the HalfUNetNowcaster respects the required input shape structure
-        # (batch, input_steps, num_vars, H, W), even though the internal U-Net is channel-stacked.
-        # Adding this property allows the config consistency checks to verify that
-        # the dataset and model agree on the expected number of input channels.
+        # Externally the model handles (batch, time, channels, height, width);
+        # internally the U-Net channel-stacks time into (batch, time*channels, ...).
+        # This property lets config consistency checks verify dataset-model agreement.
         return self.num_vars
 
     def forward(
         self,
-        x: Float[torch.Tensor, "batch input_steps in_channels H W"],
-        steps: int,
-        ensemble_size: int = 1,
-    ) -> Float[torch.Tensor, "batch steps out_channels H W"]:
-        # channel-stack all input frames: (b, t, c, h, w) -> (b, t*c, h, w)
+        x: Float[torch.Tensor, "batch time channels height width"],
+    ) -> Float[torch.Tensor, "batch forecast_steps ensemble_size out_channels height width"]:
         x_flat = einops.rearrange(x, "b t c h w -> b (t c) h w")
         preds = []
-        for _ in range(steps):
-            y = self.unet(x_flat)   # [B, num_vars, H, W]
-            preds.append(y.unsqueeze(1))
-            # slide window: drop the oldest timestep (first num_vars channels),
-            # append the latest prediction as the newest timestep
+        for _ in range(self.forecast_steps):
+            y = self.unet(x_flat)
+            preds.append(y)
             x_flat = torch.cat([x_flat[:, self.num_vars:], y], dim=1)
-        return torch.cat(preds, dim=1)
+        return einops.rearrange(torch.stack(preds, dim=1), "b t c h w -> b t 1 c h w")
 
-cfg = training_experiment.as_buildable()
+cfg = convgru_training_experiment.as_buildable()
 use_random_sampler(cfg)
 
 cfg.pl_module.network = fdl.Config(
     HalfUNetNowcaster,
-    input_steps=cfg.data.dataset_factory.input_steps,
-    num_vars=len(cfg.data.dataset_factory.standard_names),
+    input_steps=cfg.data.input_steps,
+    forecast_steps=cfg.data.forecast_steps,
+    num_vars=len(cfg.data.sequence_dataset_factory.standard_names),
 )
+# The base ConvGRU config uses CRPS for ensemble forecasts; this adapter is
+# deterministic and exposes only one member, so use a deterministic loss.
+cfg.pl_module.loss_class = "mse"
+cfg.pl_module.loss_params = None
 
 train_from_config(cfg)
 ```
@@ -255,7 +321,7 @@ experiment.run()              # trainer.fit() + trainer.test()
 |---------|-----------|--------------|
 | `use_mlflow_logger` | *(none)* | Replaces the default `TensorBoardLogger` with `MLFlowLogger` and appends `LogSystemInfoCallback`; respects the `MLFLOW_TRACKING_URI` environment variable |
 | `set_variables` | `standard_names` | Sets the list of input variables on the dataset and updates `network.input_channels` to match |
-| `toggle_masking` | `enabled` | Toggles masked-loss mode by setting both `dataset_factory.return_mask` and `pl_module.masked_loss` to the same value |
+| `toggle_masking` | `enabled` | Toggles masked-loss mode by setting both `data.return_mask` and `pl_module.masked_loss` to the same value |
 | `use_anon_s3_dataset` | `zarr_path`, `endpoint_url` | Points the dataset at an anonymous S3 object store; sets `zarr_path` and the required `storage_options` together |
 | `use_random_sampler` | *(none)* | Switches the dataset factory to the on-the-fly random sampler (useful during development when no precomputed CSV is available) |
 
@@ -270,17 +336,37 @@ mlcast/
 │   ├── callbacks.py                     # Training callbacks
 │   ├── visualization.py                 # TensorBoard image logging helpers
 │   ├── config/
-│   │   ├── base.py                      # Default training_experiment @auto_config
+│   │   ├── base.py                      # Experiment dataclass
+│   │   ├── archetype/
+│   │   │   ├── convgru.py               # ConvGRU training config @auto_config
+│   │   │   └── latent_diffusion.py      # Two-stage latent diffusion config @auto_config
 │   │   ├── fiddlers.py                  # Semantic config mutators
 │   │   ├── consistency_checks.py        # Cross-parameter validation
 │   │   ├── loader.py                    # YAML config loader
 │   │   └── orchestrator.py             # train_from_config, config persistence
 │   ├── data/
-│   │   ├── source_data_datamodule.py    # Lightning DataModule
-│   │   ├── source_data_datasets.py      # Zarr-backed PyTorch datasets
+│   │   ├── datamodules.py               # Lightning DataModules
+│   │   ├── sequence.py                  # Zarr-backed sequence datasets
+│   │   ├── forecasting.py               # Forecasting task dataset wrapper
+│   │   ├── reconstruction.py            # Reconstruction task dataset wrapper
 │   │   └── normalization.py             # Normalisation registry
-│   └── models/
-│       └── convgru.py                   # ConvGRU encoder-decoder
+│   ├── models/
+│   │   ├── convgru.py                   # ConvGRU encoder-decoder
+│   │   ├── autoencoder/
+│   │   │   ├── encoder.py               # Encoder
+│   │   │   ├── decoder.py               # Decoder
+│   │   │   └── net.py                   # AutoencoderNet composition
+│   │   └── diffusion/
+│   │       ├── conditioner.py           # ConditionerNet (context builder)
+│   │       ├── denoiser.py              # DenoiserUNet
+│   │       ├── scheduler.py             # Diffusion noise scheduler
+│   │       ├── sampler.py               # Inference-time sampling loop
+│   │       ├── ema.py                   # EMA weight tracking
+│   │       ├── loss.py                  # Diffusion loss
+│   │       └── net.py                   # LatentDiffusionNet composition
+│   └── modules/
+│       ├── forecasting.py               # Base + OutputSpace + LatentDiffusion task modules
+│       └── reconstruction.py            # ReconstructionTaskModule
 ├── tests/
 ├── pyproject.toml
 └── README.md
@@ -314,7 +400,8 @@ doubled at each block via `PixelShuffle(2)`.
 
 **Ensemble** — when `ensemble_size > 1` the decoder is run `ensemble_size`
 times, each time with freshly sampled Gaussian noise.  The results are
-concatenated along the channel dimension.
+stacked along an explicit ensemble dimension, giving the final shape
+`(batch, forecast_steps, ensemble_size, channels, height, width)`.
 
 **Deterministic variant** ([diagram source](https://docs.google.com/presentation/d/1U2Y9vZADXTsgQBNiWYAgOwYeMPVu7TOk/edit?slide=id.p6#slide=id.p6)):
 
@@ -325,11 +412,96 @@ concatenated along the channel dimension.
 ![ConvGruModel stochastic architecture](docs/architectures/convgru-stochastic.png)
 
 
+### LatentDiffusionNet (two-stage latent diffusion)
+
+This is a **two-stage** latent diffusion nowcasting system. Stage 1 trains an
+autoencoder on reconstruction windows; stage 2 trains a latent diffusion model
+that forecasts in the autoencoder's latent space and decodes forecasts back to
+data space.
+
+The architecture components live under `src/mlcast/models/autoencoder/` and
+`src/mlcast/models/diffusion/`. The task-level Lightning modules live under
+`src/mlcast/modules/` and are wired together by
+[`latent_diffusion_experiment`](src/mlcast/config/archetype/latent_diffusion.py).
+
+#### Stage 1 — Autoencoder reconstruction
+
+The autoencoder is built from an
+[`Encoder`](src/mlcast/models/autoencoder/encoder.py) and
+[`Decoder`](src/mlcast/models/autoencoder/decoder.py), composed by
+[`AutoencoderNet`](src/mlcast/models/autoencoder/net.py).
+
+- **Encoder** — a stack of `EncoderBlock` layers. Each block downsamples
+  spatial resolution via strided 3D convolution and doubles the channel count.
+  The final output is a latent tensor with shape
+  `(batch, latent_channels, time, latent_height, latent_width)`.
+- **Decoder** — a stack of `DecoderBlock` layers that mirror the encoder. Each
+  block upsamples spatial resolution via transposed 3D convolution and halves
+  the channel count, reconstructing the original input shape.
+
+The autoencoder is trained on overlapping temporal windows via
+[`ReconstructionDataset`](src/mlcast/data/reconstruction.py) and
+[`ReconstructionDataModule`](src/mlcast/data/datamodules.py). The
+[`ReconstructionTaskModule`](src/mlcast/modules/reconstruction.py) optimises
+the full autoencoder parameters against an MSE reconstruction loss.
+
+#### Stage 2 — Latent diffusion forecasting
+
+The latent diffusion model is built from a
+[`ConditionerNet`](src/mlcast/models/diffusion/conditioner.py),
+[`DenoiserUNet`](src/mlcast/models/diffusion/denoiser.py), and
+[`DiffusionScheduler`](src/mlcast/models/diffusion/scheduler.py), composed by
+[`LatentDiffusionNet`](src/mlcast/models/diffusion/net.py).
+
+- **ConditionerNet** — projects encoded input-history latents through a series
+  of residual 3D convolution blocks to produce a conditioning context for the
+  denoiser U-Net. This answers "what did the recent past look like in latent
+  space?"
+- **DenoiserUNet** — a timestep-aware U-Net with 3D convolutions over the
+  latent spatial dimensions (time dimension is preserved). It receives the
+  noisy target latent, a diffusion timestep embedding (sinusoidal), and the
+  conditioning context from the conditioner. The U-Net predicts the additive
+  noise (`eps` parameterization) that was applied to reach the current
+  timestep.
+- **DiffusionScheduler** — defines the forward diffusion noise schedule
+  (linear beta schedule by default) and provides the pre-computed alpha/beta
+  buffers used by the forward and reverse processes.
+
+Training uses a standard MSE diffusion loss (`DiffusionLoss` in
+`src/mlcast/models/diffusion/loss.py`): for each batch the input is encoded
+with the trained (frozen) encoder, the target is encoded with the same encoder,
+a random timestep is drawn per sample, noise is added to the target latents,
+and the denoiser is trained to predict the added noise.
+
+Inference uses a [`DiffusionSampler`](src/mlcast/models/diffusion/sampler.py)
+to progressively denoise random latents conditioned on encoded input history.
+The reverse diffusion loop steps backward through the schedule, and the final
+denoised latent is decoded back to data space by the trained decoder, giving
+an explicit ensemble dimension in the output shape
+`(batch, forecast_steps, ensemble_size, channels, height, width)`. When
+`ensemble_size > 1`, the process is repeated with fresh noise and the results
+are stacked.
+
+#### Two-stage training experiment
+
+The [`latent_diffusion_experiment`](src/mlcast/config/archetype/latent_diffusion.py) auto-config
+orchestrates both stages:
+
+- Stage 1 builds a `ReconstructionDataModule`, `AutoencoderNet`, and
+  `ReconstructionTaskModule`, then calls `trainer.fit() + trainer.test()`.
+- Stage 2 reuses the **same trained autoencoder instance** (Fiddle graph
+  identity sharing), builds a `ForecastingDataModule` and
+  `LatentDiffusionTaskModule`, then calls `trainer.fit() + trainer.test()`.
+- The stage-2 module freezes the autoencoder on `fit_start` and optimises only
+  the diffusion-network parameters.
+
+
 ### Custom network interface
 
 Any network architecture can be used by replacing `cfg.pl_module.network`
-with a `fdl.Config` node pointing at your class.  The only requirement is
-that `forward` accepts the following signature:
+with a `fdl.Config` node pointing at your class. Forecasting models should set
+`input_steps`, `forecast_steps`, and `ensemble_size` during initialization. The
+only runtime `forward` requirement is:
 
 ```python
 # from jaxtyping import Float
@@ -338,11 +510,14 @@ that `forward` accepts the following signature:
 def forward(
     self,
     x: Float[torch.Tensor, "batch input_steps in_channels H W"],
-    steps: int,          # number of forecast steps to produce
-    ensemble_size: int,  # number of stochastic ensemble members
-) -> Float[torch.Tensor, "batch steps out_channels H W"]:
+) -> Float[torch.Tensor, "batch forecast_steps ensemble_size out_channels H W"]:
     ...
 ```
+
+The output has an explicit ensemble dimension. For deterministic models
+(`ensemble_size=1`) this dimension is 1. If a loss function operates over
+the full forecast tensor without splitting ensemble members (e.g. MSE on
+the ensemble mean), the task module handles reshaping automatically.
 
 If your network uses a different parameter name for the input channel count
 than `input_channels` (the default assumed by `ConvGruModel` and the

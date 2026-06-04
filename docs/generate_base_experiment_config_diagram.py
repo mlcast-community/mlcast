@@ -1,4 +1,4 @@
-"""Generate a Graphviz SVG diagram of the default training_experiment config.
+"""Generate a Graphviz SVG diagram of the included ConvGRU training config.
 
 Run without arguments to regenerate docs/config_diagram.svg:
 
@@ -15,13 +15,13 @@ from pathlib import Path
 
 import fiddle.graphviz as fgv
 
-from mlcast.config import training_experiment
+from mlcast.config import convgru_training_experiment
 
 OUT = Path(__file__).parent / "config_diagram.svg"
 
 
 def main() -> None:
-    """Generate or verify the base experiment config diagram."""
+    """Generate or verify the ConvGRU training config diagram."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--check",
@@ -30,7 +30,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    cfg = training_experiment.as_buildable()
+    cfg = convgru_training_experiment.as_buildable()
     g = fgv.render(cfg, max_str_length=40)
     g.format = "svg"
     new_svg = g.pipe().decode()

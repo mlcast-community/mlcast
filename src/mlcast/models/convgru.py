@@ -195,6 +195,12 @@ class Encoder(nn.Module):
 
     Parameters
     ----------
+    input_steps : int
+        Number of timesteps the model expects as input.
+    forecast_steps : int
+        Number of timesteps the model forecasts.
+    ensemble_size : int, optional
+        Number of ensemble members produced by the model. Default is ``1``.
     input_channels : int, optional
         Number of input channels. Default is ``1``.
     num_blocks : int, optional
@@ -350,8 +356,27 @@ class ConvGruModel(nn.Module):
         :class:`Decoder`.
     """
 
-    def __init__(self, input_channels: int = 1, num_blocks: int = 4, noisy_decoder: bool = False, **kwargs):
+    def __init__(
+        self,
+        input_steps: int,
+        forecast_steps: int,
+        ensemble_size: int = 1,
+        input_channels: int = 1,
+        num_blocks: int = 4,
+        noisy_decoder: bool = False,
+        **kwargs,
+    ):
         super().__init__()
+        if input_steps < 1:
+            raise ValueError(f"input_steps ({input_steps}) must be at least 1.")
+        if forecast_steps < 1:
+            raise ValueError(f"forecast_steps ({forecast_steps}) must be at least 1.")
+        if ensemble_size < 1:
+            raise ValueError(f"ensemble_size ({ensemble_size}) must be at least 1.")
+
+        self.input_steps = input_steps
+        self.forecast_steps = forecast_steps
+        self.ensemble_size = ensemble_size
         self.input_channels = input_channels
         self.num_blocks = num_blocks
         self.noisy_decoder = noisy_decoder
@@ -360,25 +385,23 @@ class ConvGruModel(nn.Module):
 
     @jaxtyped(typechecker=beartype)
     def forward(
-        self, x: Float[torch.Tensor, "batch time channels height width"], steps: int, ensemble_size: int = 1
-    ) -> Float[torch.Tensor, "batch steps _ height width"]:
+        self, x: Float[torch.Tensor, "batch time channels height width"]
+    ) -> Float[torch.Tensor, "batch forecast_steps ensemble_size out_channels height width"]:
         """Forward the encoder-decoder model.
 
         Parameters
         ----------
         x : Float[torch.Tensor, "batch time channels height width"]
             Input sequence.
-        steps : int
-            Number of future timesteps to forecast.
-        ensemble_size : int, optional
-            Number of ensemble members to generate. When ``> 1``, the decoder
-            is always run with noisy inputs. Default is ``1``.
 
         Returns
         -------
-        preds : Float[torch.Tensor, "batch steps out_channels height width"]
-            Forecast tensor.
+        preds : Float[torch.Tensor, "batch forecast_steps ensemble_size out_channels height width"]
+            Forecast tensor with an explicit ensemble dimension.
         """
+        if x.shape[1] != self.input_steps:
+            raise ValueError(f"Expected {self.input_steps} input timesteps, got {x.shape[1]}.")
+
         _, _, _, H, W = x.shape
         divisor = 2**self.num_blocks
         pad_h = (divisor - (H % divisor)) % divisor
@@ -390,21 +413,21 @@ class ConvGruModel(nn.Module):
         encoded = self.encoder(x)
 
         x_dec_shape = list(encoded[-1].shape)
-        x_dec_shape[1] = steps
+        x_dec_shape[1] = self.forecast_steps
 
         last_hidden_per_block = [e[:, -1] for e in reversed(encoded)]
 
-        if ensemble_size > 1:
+        if self.ensemble_size > 1:
             preds = []
-            for _ in range(ensemble_size):
+            for _ in range(self.ensemble_size):
                 x_dec = torch.randn(x_dec_shape, dtype=encoded[-1].dtype, device=encoded[-1].device)
                 decoded = self.decoder(x_dec, last_hidden_per_block)
                 preds.append(decoded)
-            out = torch.cat(preds, dim=2)
+            out = torch.stack(preds, dim=2)
         else:
             x_dec_func = torch.randn if self.noisy_decoder else torch.zeros
             x_dec = x_dec_func(x_dec_shape, dtype=encoded[-1].dtype, device=encoded[-1].device)
-            out = self.decoder(x_dec, last_hidden_per_block)
+            out = self.decoder(x_dec, last_hidden_per_block).unsqueeze(2)
 
         if pad_h > 0 or pad_w > 0:
             out = out[..., :H, :W]

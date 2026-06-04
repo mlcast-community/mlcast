@@ -28,11 +28,17 @@ repos:
   - id: pyproject-fmt
 - repo: local
   hooks:
-  - id: config-diagram
-    name: config diagram up to date
+  - id: config-diagram-convgru
+    name: convgru config diagram up to date
     language: system
     entry: uv run python docs/generate_base_experiment_config_diagram.py --check
-    files: ^src/mlcast/config/base\.py$
+    files: ^src/mlcast/config/(base|archetype/convgru)\.py$
+    pass_filenames: false
+  - id: config-diagram-latent-diffusion
+    name: latent diffusion config diagram up to date
+    language: system
+    entry: uv run python docs/generate_latent_diffusion_config_diagram.py --check
+    files: ^src/mlcast/config/archetype/latent_diffusion\.py$
     pass_filenames: false
 ci:
   autoupdate_schedule: monthly

@@ -3,28 +3,29 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+import torch
 from torch.utils.data import DataLoader, Dataset
 
-from mlcast.data.source_data_datamodule import SourceDataDataModule
+from mlcast.data.datamodules import ForecastingDataModule, ReconstructionDataModule
+from mlcast.data.forecasting import ForecastingDataset
+from mlcast.data.reconstruction import ReconstructionDataset
 from mlcast.data.splits import splitting_uses_fractions, splitting_uses_tuple_ranges, validate_splits
 
 
-class MockDataset(Dataset):
-    """Minimal dataset mock that records how it was constructed.
-
-    ``__len__`` returns a fixed size so that dataloader batch-count assertions
-    work correctly.
-    """
+class MockSequenceDataset(Dataset):
+    """Minimal sequence dataset mock that records how it was constructed."""
 
     def __init__(
         self,
         zarr_path: str,
+        sequence_steps: int,
         subset: dict | None = None,
         augment: bool = False,
         epoch_size: int = 100,
         **kwargs,
     ) -> None:
         self.zarr_path = zarr_path
+        self.sequence_steps = sequence_steps
         self.subset = subset
         self.augment = augment
         self.epoch_size = epoch_size
@@ -33,8 +34,9 @@ class MockDataset(Dataset):
     def __len__(self) -> int:
         return self.epoch_size
 
-    def __getitem__(self, idx: int) -> dict:
-        return {"data": idx}
+    def __getitem__(self, idx: int) -> torch.Tensor:
+        base = torch.arange(self.sequence_steps, dtype=torch.float32)[:, None, None, None]
+        return base.expand(-1, 1, 4, 4)
 
 
 def _mock_zarr(time_index: pd.DatetimeIndex) -> MagicMock:
@@ -109,30 +111,41 @@ def test_splitting_mode_helpers_require_consistent_values() -> None:
     assert not splitting_uses_tuple_ranges({"train": object(), "val": object()})
 
 
-def test_data_module_ratio_splits() -> None:
+def test_forecasting_data_module_ratio_splits() -> None:
     """DataModule ratio mode passes correct time subsets to the factory."""
     n = 100
     time_index = _make_time_index(n)
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr", foo="bar")
+    sequence_dataset_factory = functools.partial(
+        MockSequenceDataset,
+        zarr_path="mock.zarr",
+        sequence_steps=6,
+        foo="bar",
+    )
 
-    dm = SourceDataDataModule(
-        dataset_factory=dataset_factory, splits={"time": {"train": 0.5, "val": 0.2, "test": 0.3}}, batch_size=2
+    dm = ForecastingDataModule(
+        sequence_dataset_factory=sequence_dataset_factory,
+        input_steps=2,
+        forecast_steps=4,
+        return_mask=True,
+        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.3}},
+        batch_size=2,
     )
 
     with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
         dm.setup(stage="fit")
 
-    assert dm.train_dataset.augment is True
-    assert dm.train_dataset.kwargs["foo"] == "bar"
-    train_start, train_end = dm.train_dataset.subset["time"]
-    val_start, val_end = dm.val_dataset.subset["time"]
+    assert isinstance(dm.train_dataset, ForecastingDataset)
+    assert dm.train_dataset.base_sequence_dataset.augment is True
+    assert dm.train_dataset.base_sequence_dataset.kwargs["foo"] == "bar"
+    train_start, train_end = dm.train_dataset.base_sequence_dataset.subset["time"]
+    val_start, val_end = dm.val_dataset.base_sequence_dataset.subset["time"]
 
     assert train_start == str(time_index[0])
     assert train_end == str(time_index[49])
     assert val_start == str(time_index[50])
     assert val_end == str(time_index[69])
 
-    assert dm.val_dataset.augment is False
+    assert dm.val_dataset.base_sequence_dataset.augment is False
     assert dm.test_dataset is None
 
     train_dl = dm.train_dataloader()
@@ -147,18 +160,27 @@ def test_data_module_invalid_dataset() -> None:
         def __call__(self, **kwargs) -> Dataset:
             return MagicMock(spec=Dataset)
 
-    dm = SourceDataDataModule(dataset_factory=_NoZarrPathFactory(), splits={"time": {"train": 0.7, "val": 0.15}})
+    dm = ForecastingDataModule(
+        sequence_dataset_factory=_NoZarrPathFactory(),
+        input_steps=2,
+        forecast_steps=4,
+        return_mask=True,
+        splits={"time": {"train": 0.7, "val": 0.15}},
+    )
 
     with pytest.raises((AttributeError, KeyError)):
         dm.setup()
 
 
-def test_data_module_fraction_splits_without_test_do_not_create_test_dataset() -> None:
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+def test_forecasting_data_module_fraction_splits_without_test_do_not_create_test_dataset() -> None:
+    sequence_dataset_factory = functools.partial(MockSequenceDataset, zarr_path="mock.zarr", sequence_steps=6)
     time_index = _make_time_index(100)
 
-    dm = SourceDataDataModule(
-        dataset_factory=dataset_factory,
+    dm = ForecastingDataModule(
+        sequence_dataset_factory=sequence_dataset_factory,
+        input_steps=2,
+        forecast_steps=4,
+        return_mask=True,
         splits={"time": {"train": 0.5, "val": 0.2}},
         batch_size=2,
     )
@@ -171,18 +193,22 @@ def test_data_module_fraction_splits_without_test_do_not_create_test_dataset() -
     assert dm.test_dataset is None
 
 
-def test_data_module_split_lengths_and_batches() -> None:
-    """Test that dataset lengths and dataloader batch counts are correct after splitting.
-
-    Dataloader batch counts are correct after splitting.
-    """
+def test_forecasting_data_module_split_lengths_and_batches() -> None:
     n_time = 240
     batch_size = 10
     time_index = _make_time_index(n_time)
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr", epoch_size=10)
+    sequence_dataset_factory = functools.partial(
+        MockSequenceDataset,
+        zarr_path="mock.zarr",
+        sequence_steps=6,
+        epoch_size=10,
+    )
 
-    dm = SourceDataDataModule(
-        dataset_factory=dataset_factory,
+    dm = ForecastingDataModule(
+        sequence_dataset_factory=sequence_dataset_factory,
+        input_steps=2,
+        forecast_steps=4,
+        return_mask=True,
         splits={"time": {"train": 1 / 2, "val": 1 / 3, "test": 1 / 6}},
         batch_size=batch_size,
     )
@@ -195,11 +221,14 @@ def test_data_module_split_lengths_and_batches() -> None:
     assert len(dm.test_dataloader()) == 1
 
 
-def test_data_module_datetime_splits() -> None:
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+def test_forecasting_data_module_datetime_splits() -> None:
+    sequence_dataset_factory = functools.partial(MockSequenceDataset, zarr_path="mock.zarr", sequence_steps=6)
 
-    dm = SourceDataDataModule(
-        dataset_factory=dataset_factory,
+    dm = ForecastingDataModule(
+        sequence_dataset_factory=sequence_dataset_factory,
+        input_steps=2,
+        forecast_steps=4,
+        return_mask=True,
         splits={
             "time": {
                 "train": ("2016-01-01", "2021-12-31"),
@@ -212,36 +241,20 @@ def test_data_module_datetime_splits() -> None:
 
     dm.setup()
 
-    assert dm.train_dataset.subset == {"time": ("2016-01-01", "2021-12-31")}
-    assert dm.val_dataset.subset == {"time": ("2022-01-01", "2023-12-31")}
+    assert dm.train_dataset.base_sequence_dataset.subset == {"time": ("2016-01-01", "2021-12-31")}
+    assert dm.val_dataset.base_sequence_dataset.subset == {"time": ("2022-01-01", "2023-12-31")}
     assert dm.test_dataset is None
 
 
-def test_data_module_fraction_test_split_uses_explicit_fraction() -> None:
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
-    time_index = _make_time_index(100)
-
-    dm = SourceDataDataModule(
-        dataset_factory=dataset_factory,
-        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
-        batch_size=2,
+def test_reconstruction_data_module_wraps_sequence_splits() -> None:
+    sequence_dataset_factory = functools.partial(
+        MockSequenceDataset, zarr_path="mock.zarr", sequence_steps=5, epoch_size=5
     )
-
-    with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
-        dm.setup()
-
-    assert dm.test_dataset is not None
-    test_start, test_end = dm.test_dataset.subset["time"]
-    assert test_start == str(time_index[70])
-    assert test_end == str(time_index[79])
-
-
-def test_data_module_fit_stage_creates_only_train_and_val() -> None:
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
     time_index = _make_time_index(100)
 
-    dm = SourceDataDataModule(
-        dataset_factory=dataset_factory,
+    dm = ReconstructionDataModule(
+        sequence_dataset_factory=sequence_dataset_factory,
+        input_steps=3,
         splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
         batch_size=2,
     )
@@ -249,81 +262,59 @@ def test_data_module_fit_stage_creates_only_train_and_val() -> None:
     with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
         dm.setup(stage="fit")
 
-    assert dm.train_dataset is not None
-    assert dm.val_dataset is not None
+    assert isinstance(dm.train_dataset, ReconstructionDataset)
+    assert isinstance(dm.val_dataset, ReconstructionDataset)
     assert dm.test_dataset is None
+    assert dm.train_dataset.base_sequence_dataset.augment is True
+    assert dm.val_dataset.base_sequence_dataset.augment is False
+    assert dm.train_dataset[0].shape == (3, 1, 4, 4)
 
 
-def test_data_module_validate_stage_creates_only_val() -> None:
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
+def test_data_module_validate_test_and_logging_paths() -> None:
+    sequence_dataset_factory = functools.partial(MockSequenceDataset, zarr_path="mock.zarr", sequence_steps=6)
     time_index = _make_time_index(100)
 
-    dm = SourceDataDataModule(
-        dataset_factory=dataset_factory,
+    dm = ForecastingDataModule(
+        sequence_dataset_factory=sequence_dataset_factory,
+        input_steps=2,
+        forecast_steps=4,
+        return_mask=True,
         splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
         batch_size=2,
     )
 
     with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
         dm.setup(stage="validate")
-
     assert dm.train_dataset is None
     assert dm.val_dataset is not None
     assert dm.test_dataset is None
 
-
-def test_data_module_test_stage_creates_only_test() -> None:
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
-    time_index = _make_time_index(100)
-
-    dm = SourceDataDataModule(
-        dataset_factory=dataset_factory,
-        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
-        batch_size=2,
-    )
-
     with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
         dm.setup(stage="test")
-
     assert dm.train_dataset is None
     assert dm.val_dataset is None
     assert dm.test_dataset is not None
 
-
-def test_data_module_rejects_unknown_stage() -> None:
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
-    dm = SourceDataDataModule(
-        dataset_factory=dataset_factory,
-        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
-        batch_size=2,
-    )
-
     with pytest.raises(ValueError, match="Unsupported LightningDataModule setup stage"):
         dm.setup(stage="predict")
 
-
-def test_data_module_logs_split_summary() -> None:
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
-    time_index = _make_time_index(100)
-
-    dm = SourceDataDataModule(
-        dataset_factory=dataset_factory,
-        splits={"time": {"train": 0.5, "val": 0.2, "test": 0.1}},
-        batch_size=2,
-    )
-
     with (
         patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)),
-        patch("mlcast.data.source_data_datamodule.logger.info") as mock_info,
+        patch("mlcast.data.datamodules.logger.info") as mock_info,
     ):
         dm.setup()
-
     assert mock_info.call_count == 4
 
 
 def test_data_module_unsupported_split_mode() -> None:
-    dataset_factory = functools.partial(MockDataset, zarr_path="mock.zarr")
-    dm = SourceDataDataModule(dataset_factory=dataset_factory, splits={"time": {"train": 0.7, "val": 0.15}})
+    sequence_dataset_factory = functools.partial(MockSequenceDataset, zarr_path="mock.zarr", sequence_steps=6)
+    dm = ForecastingDataModule(
+        sequence_dataset_factory=sequence_dataset_factory,
+        input_steps=2,
+        forecast_steps=4,
+        return_mask=True,
+        splits={"time": {"train": 0.7, "val": 0.15}},
+    )
 
     dm.splits = {"time": {"train": object(), "val": object()}}
 

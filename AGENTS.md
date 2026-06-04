@@ -23,6 +23,20 @@ Guidelines for contributors and AI agents working on this codebase.
 
 - Use `loguru` exclusively. Do not use the stdlib `logging` module.
 
+## Metric naming
+
+- Logged metric names follow TensorBoard conventions: use `/` as a hierarchy
+  separator (e.g. `val/loss`, `train/rec_loss`) so that related metrics are
+  grouped in the TensorBoard UI.
+- Use `rec_loss` for reconstruction-stage metrics and `loss` for
+  forecasting/diffusion-stage metrics to make clear which training stage a
+  metric belongs to.
+- Metric name format: `{split}/{name}` where `split` is `train`, `val`, or
+  `test`.
+- Monitoring references in config files (ModelCheckpoint, EarlyStopping,
+  lr_scheduler) must match the `val/{name}` variant of the metric they should
+  track.
+
 ## Code style
 
 - Docstrings follow NumPy style.

@@ -5,10 +5,11 @@ parameter from the command line.
 
 Usage examples::
 
-    # Train with default config and override dataset path:
+    # Train with an included config and override dataset path:
     python -m mlcast train \\
+        --config config:convgru_training_experiment \\
         --config fiddler:use_random_sampler \\
-        --config set:data.dataset_factory.zarr_path="'/path/to/data.zarr'"
+        --config set:data.sequence_dataset_factory.zarr_path="'/path/to/data.zarr'"
 
     # Train from a previously saved YAML config:
     python -m mlcast train --config /path/to/config.yaml
@@ -18,8 +19,8 @@ Usage examples::
         --config /path/to/config.yaml \\
         --config set:trainer.max_epochs=50
 
-    # Switch to a different base config function entirely:
-    python -m mlcast train --config=config:another_experiment_function
+    # Use a different included config function:
+    python -m mlcast train --config config:another_experiment_function
 """
 
 import argparse
@@ -35,14 +36,14 @@ from rich.console import Console
 from rich.text import Text
 
 from . import config  # noqa: F401 — module must be importable for absl_flags
-from .config import load_yaml_config, train_from_config, training_experiment
+from .config import convgru_training_experiment, load_yaml_config, train_from_config
 
 FLAGS = flags.FLAGS
 
 _config = absl_flags.DEFINE_fiddle_config(
     "config",
     default_module=config,
-    help_string="Experiment configuration. Default is training_experiment.",
+    help_string="Experiment configuration. Required: use config:<name> or a YAML path.",
 )
 
 flags.DEFINE_boolean(
@@ -52,50 +53,68 @@ flags.DEFINE_boolean(
 )
 
 
-def get_cli_examples(cfg: fdl.Buildable) -> list[tuple[str, str]]:
+def get_included_config_names() -> list[str]:
+    """Return public config factory names exposed by ``mlcast.config``."""
+    included_configs: list[str] = []
+    for name in getattr(config, "__all__", []):
+        value = getattr(config, name, None)
+        if callable(value) and hasattr(value, "as_buildable"):
+            included_configs.append(name)
+    return included_configs
+
+
+def get_cli_examples(
+    cfg: fdl.Buildable, base_config_name: str = "convgru_training_experiment"
+) -> list[tuple[str, str]]:
     """Returns a list of (description, flag_string) tuples for CLI parameter overrides."""
     return [
         (
             f"Override data layer properties (default batch_size: {cfg.data.batch_size})",
-            f"--config set:data.batch_size={max(1, cfg.data.batch_size * 2)}",
+            f"--config config:{base_config_name} --config set:data.batch_size={max(1, cfg.data.batch_size * 2)}",
         ),
         (
-            f"Override the path to the Zarr dataset (default: {cfg.data.dataset_factory.zarr_path})",
-            "--config set:data.dataset_factory.zarr_path='/new/path/to/radar.zarr'",
+            f"Override the path to the Zarr dataset (default: {cfg.data.sequence_dataset_factory.zarr_path})",
+            f"--config config:{base_config_name} "
+            "--config set:data.sequence_dataset_factory.zarr_path='/new/path/to/radar.zarr'",
         ),
         (
             f"Override trainer properties (default max_epochs: {cfg.trainer.max_epochs})",
-            f"--config set:trainer.max_epochs={max(1, cfg.trainer.max_epochs // 2)}",
+            f"--config config:{base_config_name} --config set:trainer.max_epochs={max(1, cfg.trainer.max_epochs // 2)}",
         ),
         (
             f"Override network architecture properties (default num_blocks: {cfg.pl_module.network.num_blocks})",
-            f"--config set:pl_module.network.num_blocks={max(1, cfg.pl_module.network.num_blocks - 1)}",
+            "--config config:"
+            f"{base_config_name} "
+            "--config set:pl_module.network.num_blocks="
+            f"{max(1, cfg.pl_module.network.num_blocks - 1)}",
         ),
         (
             f"Override the optimizer learning rate (default lr: {cfg.pl_module.optimizer.lr})",
-            "--config set:pl_module.optimizer.lr=0.1",
+            f"--config config:{base_config_name} --config set:pl_module.optimizer.lr=0.1",
         ),
     ]
 
 
-def get_fiddler_examples() -> list[tuple[str, str]]:
+def get_fiddler_examples(base_config_name: str = "convgru_training_experiment") -> list[tuple[str, str]]:
     """Returns a list of (description, flag_string) tuples for Fiddler mutators."""
     return [
         (
             "Switch to the random sampling dataset (instead of the precomputed CSV sampler)",
-            "--config fiddler:use_random_sampler",
+            f"--config config:{base_config_name} --config fiddler:use_random_sampler",
         ),
         (
             "Change the input variables and automatically adjust the network's input_channels",
+            "--config config:"
+            f"{base_config_name} "
             "--config \"fiddler:set_variables(standard_names=['rainfall_rate', 'reflectivity'])\"",
         ),
         (
             "Toggle whether the loss function ignores masked/invalid pixels",
-            '--config "fiddler:toggle_masking(enabled=False)"',
+            f'--config config:{base_config_name} --config "fiddler:toggle_masking(enabled=False)"',
         ),
         (
             "Train using an anonymous S3 object store dataset (e.g. the Italian dataset)",
-            '--config "fiddler:use_anon_s3_dataset('
+            f'--config config:{base_config_name} --config "fiddler:use_anon_s3_dataset('
             "zarr_path='s3://mlcast-source-datasets/IT-DPC-SRI/v0.1.0/italian-radar-dpc-sri.zarr/', "
             "endpoint_url='https://object-store.os-api.cci2.ecmwf.int')\"",
         ),
@@ -105,14 +124,24 @@ def get_fiddler_examples() -> list[tuple[str, str]]:
 def _build_help_text(cfg: fdl.Buildable) -> Text:
     """Build Rich-highlighted help text for the ``train`` subcommand."""
     t = Text()
+    included_config_names = get_included_config_names()
 
     t.append("Train a model using a Fiddle configuration.\n\n", style="bold")
+    t.append("You must provide a base config via ", style="bold")
+    t.append("--config config:<name>", style="bold cyan")
+    t.append(" or ", style="bold")
+    t.append("--config /path/to/config.yaml", style="bold cyan")
+    t.append(".\n\n", style="bold")
+    t.append("Included configs:\n", style="bold yellow")
+    for name in included_config_names:
+        t.append(f"  - {name}\n", style="green")
+    t.append("\n")
     t.append("You can override parameters from the command line using the ")
     t.append("--config set:path.to.param=value", style="bold cyan")
     t.append(" syntax.\n\n")
     t.append("Examples", style="bold yellow")
-    t.append(" (based on the default ")
-    t.append("training_experiment", style="bold green")
+    t.append(" (based on the included ")
+    t.append("convgru_training_experiment", style="bold green")
     t.append(" config):\n")
 
     for desc, cmd in get_cli_examples(cfg):
@@ -130,25 +159,28 @@ def _build_help_text(cfg: fdl.Buildable) -> Text:
         t.append(cmd, style="cyan")
         t.append("\n")
 
-    t.append("\nSwitching experiments:\n", style="bold yellow")
+    t.append("\nConfig sources:\n", style="bold yellow")
     t.append("\n  # Resume from or reproduce a previously saved YAML config:\n", style="dim")
     t.append("  mlcast train ", style="bold")
     t.append("--config /path/to/config.yaml\n", style="cyan")
     t.append("\n  # Load a YAML config and apply additional overrides on top:\n", style="dim")
     t.append("  mlcast train ", style="bold")
     t.append("--config /path/to/config.yaml --config set:trainer.max_epochs=50\n", style="cyan")
-    t.append("\n  # Use a different base config function defined in src/mlcast/config/.\n", style="dim")
+    t.append("\n  # Use a different included config function defined in src/mlcast/config/.\n", style="dim")
     t.append("  # Syntax: --config=config:<function_name>  where ", style="dim")
     t.append("config:", style="dim bold")
     t.append(" is a Fiddle prefix that resolves\n", style="dim")
     t.append("  # the function name against the config module (not a Python module path).\n", style="dim")
     t.append("  mlcast train ", style="bold")
-    t.append("--config=config:another_experiment_function\n", style="cyan")
+    t.append("--config config:convgru_training_experiment\n", style="cyan")
 
     t.append("\nInspecting the resolved config:\n", style="bold yellow")
     t.append("  # Print the fully resolved config as YAML without starting training:\n", style="dim")
     t.append("  mlcast train ", style="bold")
-    t.append("--config fiddler:use_random_sampler --print_config_and_exit\n", style="cyan")
+    t.append(
+        "--config config:convgru_training_experiment --config fiddler:use_random_sampler --print_config_and_exit\n",
+        style="cyan",
+    )
 
     return t
 
@@ -335,14 +367,14 @@ def train_main(argv: list[str]) -> None:
 def cli() -> None:
     """Console script entry point for the ``mlcast`` command.
 
-    This parses standard CLI arguments via `argparse`, injects Fiddle default
-    overrides if no base configuration is provided, formats the `--help`
-    output, and safely passes execution over to `absl.app.run`.
+    This parses standard CLI arguments via `argparse`, validates that an
+    explicit base configuration was provided, formats the `--help` output, and
+    safely passes execution over to `absl.app.run`.
     """
 
     # Dynamically generate help text showing Fiddle overrides
     try:
-        cfg = training_experiment.as_buildable()
+        cfg = convgru_training_experiment.as_buildable()
         description_text = _build_help_text(cfg)
     except Exception:
         # Fallback if config generation fails during CLI initialization
@@ -378,16 +410,22 @@ def cli() -> None:
         yaml_path, remaining = _extract_yaml_config_path(remaining)
 
         # Case 2: user supplied an explicit base config function
-        #   e.g. --config=config:another_experiment_function
+        #   e.g. --config config:convgru_training_experiment
         has_explicit_config = any(
             arg.startswith("--config=config:")
             or (arg == "--config" and i + 1 < len(remaining) and remaining[i + 1].startswith("config:"))
             for i, arg in enumerate(remaining)
         )
 
-        # Case 3: no base config from either source — fall back to training_experiment
         if not has_explicit_config and yaml_path is None:
-            remaining = ["--config=config:training_experiment"] + remaining
+            included = ", ".join(get_included_config_names())
+            print(
+                "Error: a base config is required. Provide either "
+                "'--config config:<name>' or '--config /path/to/config.yaml'.\n"
+                f"Included configs: {included}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
         remaining = auto_quote_fiddle_strings(remaining)
 

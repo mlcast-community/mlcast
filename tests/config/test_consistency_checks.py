@@ -3,16 +3,16 @@ from types import SimpleNamespace
 import pytest
 from loguru import logger
 
-from mlcast.config import training_experiment, validate_config
-from mlcast.data.source_data_datasets import SourceDataPrecomputedSamplingDataset
+from mlcast.config import convgru_training_experiment, validate_config
+from mlcast.data.sequence import SourceDataPrecomputedSequenceDataset
 
 
 def test_contract_1_input_channels() -> None:
     """Verify Contract 1: Network input_channels == len(dataset_factory.standard_names)."""
-    cfg = training_experiment.as_buildable()
+    cfg = convgru_training_experiment.as_buildable()
     # Break Contract 1
     cfg.pl_module.network.input_channels = 2
-    cfg.data.dataset_factory.standard_names = ["rainfall_rate"]
+    cfg.data.sequence_dataset_factory.standard_names = ["rainfall_rate"]
 
     with pytest.raises(ValueError, match="Contract 1 violated:"):
         validate_config(cfg)
@@ -20,9 +20,9 @@ def test_contract_1_input_channels() -> None:
 
 def test_contract_2_spatial_divisibility() -> None:
     """Verify Contract 2: Dataset width must be divisible by 2 \\*\\* network.num_blocks."""
-    cfg = training_experiment.as_buildable()
+    cfg = convgru_training_experiment.as_buildable()
     # Break Contract 2
-    cfg.data.dataset_factory.width = 250
+    cfg.data.sequence_dataset_factory.width = 250
     cfg.pl_module.network.num_blocks = 4
 
     with pytest.raises(ValueError, match="Contract 2 violated:"):
@@ -31,7 +31,7 @@ def test_contract_2_spatial_divisibility() -> None:
 
 def test_contract_1_and_2_warn_when_network_lacks_attrs() -> None:
     """Verify Contracts 1 and 2 warn when the network lacks required attrs."""
-    cfg = training_experiment.as_buildable()
+    cfg = convgru_training_experiment.as_buildable()
     cfg.pl_module.network = SimpleNamespace()
 
     messages: list[str] = []
@@ -51,9 +51,9 @@ def test_contract_1_and_2_warn_when_network_lacks_attrs() -> None:
 
 def test_contract_3_probabilistic_loss() -> None:
     """Verify Contract 3: Ensemble models require CRPS or AFCRPS."""
-    cfg = training_experiment.as_buildable()
+    cfg = convgru_training_experiment.as_buildable()
     # Break Contract 3
-    cfg.pl_module.ensemble_size = 5
+    cfg.pl_module.network.ensemble_size = 5
     cfg.pl_module.loss_class = "mse"
 
     with pytest.raises(ValueError, match="Contract 3 violated:"):
@@ -62,22 +62,41 @@ def test_contract_3_probabilistic_loss() -> None:
 
 def test_contract_4_masking_sync() -> None:
     """Verify Contract 4: Dataset return_mask must match model masked_loss."""
-    cfg = training_experiment.as_buildable()
+    cfg = convgru_training_experiment.as_buildable()
     # Break Contract 4
-    cfg.data.dataset_factory.return_mask = True
+    cfg.data.return_mask = True
     cfg.pl_module.masked_loss = False
 
     with pytest.raises(ValueError, match="Contract 4 violated:"):
         validate_config(cfg)
 
 
-def test_dataset_forecast_steps_guard() -> None:
-    """Verify that dataset raises ValueError when input_steps=0."""
-    with pytest.raises(ValueError, match="input_steps"):
-        SourceDataPrecomputedSamplingDataset(
+def test_contract_5_input_steps_sync() -> None:
+    """Verify Contract 5: data input_steps must match model input_steps."""
+    cfg = convgru_training_experiment.as_buildable()
+    cfg.data.input_steps = 4
+    cfg.pl_module.network.input_steps = 6
+
+    with pytest.raises(ValueError, match="Contract 5 violated:"):
+        validate_config(cfg)
+
+
+def test_contract_6_forecast_steps_sync() -> None:
+    """Verify Contract 6: data forecast_steps must match model forecast_steps."""
+    cfg = convgru_training_experiment.as_buildable()
+    cfg.data.forecast_steps = 10
+    cfg.pl_module.network.forecast_steps = 12
+
+    with pytest.raises(ValueError, match="Contract 6 violated:"):
+        validate_config(cfg)
+
+
+def test_dataset_sequence_steps_guard() -> None:
+    """Verify that sequence dataset raises ValueError when sequence_steps=0."""
+    with pytest.raises(ValueError, match="sequence_steps"):
+        SourceDataPrecomputedSequenceDataset(
             zarr_path="dummy.zarr",
             csv_path="dummy.csv",
             standard_names=["rainfall_rate"],
-            input_steps=0,
-            forecast_steps=5,
+            sequence_steps=0,
         )
