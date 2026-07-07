@@ -4,7 +4,7 @@ import pytest
 from loguru import logger
 
 from mlcast.config import training_experiment, validate_config
-from mlcast.data.source_data_datasets import SourceDataPrecomputedSamplingDataset
+from mlcast.data.source_data_datasets import SourceDataIndexedDataset
 
 
 def test_contract_1_input_channels() -> None:
@@ -74,9 +74,9 @@ def test_contract_4_masking_sync() -> None:
 def test_dataset_forecast_steps_guard() -> None:
     """Verify that dataset raises ValueError when input_steps=0."""
     with pytest.raises(ValueError, match="input_steps"):
-        SourceDataPrecomputedSamplingDataset(
+        SourceDataIndexedDataset(
             zarr_path="dummy.zarr",
-            csv_path="dummy.csv",
+            index_path="dummy.csv",
             standard_names=["rainfall_rate"],
             input_steps=0,
             forecast_steps=5,

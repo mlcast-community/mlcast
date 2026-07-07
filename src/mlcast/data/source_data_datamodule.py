@@ -17,6 +17,7 @@ from mlcast.data.splits import (
     splitting_uses_tuple_ranges,
     validate_splits,
 )
+from mlcast.sampling import Sampler
 
 
 class SourceDataDataModule(pl.LightningDataModule):
@@ -29,12 +30,16 @@ class SourceDataDataModule(pl.LightningDataModule):
     ----------
     dataset_factory : Callable[..., Dataset]
         A factory function (e.g., ``fdl.Partial``) that returns a Dataset instance.
-        It must accept ``subset`` and ``augment`` as keyword arguments.
+        It must accept ``subset``, ``augment``, and ``sampler`` keyword arguments.
     splits : dict of {str: dict}
         Nested mapping ``{coord: {split_name: value, ...}, ...}`` describing
         train/val/test subsets. Currently only the ``time`` coordinate is
         supported. Ratio mode uses float fractions, while datetime mode uses
         inclusive ``(start, end)`` ISO 8601 string tuples.
+    train_sampler, eval_sampler : Sampler or None, optional
+        Per-split candidate sampler passed to the factory (train vs val/test),
+        like ``augment``. Default ``None`` uses the full index. Keep importance
+        sampling on ``train_sampler`` so val/test stay representative.
     **dataloader_kwargs : Any
         Additional keyword arguments forwarded to ``DataLoader`` (e.g.,
         ``batch_size``, ``num_workers``, ``pin_memory``).
@@ -44,11 +49,15 @@ class SourceDataDataModule(pl.LightningDataModule):
         self,
         dataset_factory: Callable[..., Dataset],
         splits: dict[str, dict[str, Any]],
+        train_sampler: Sampler | None = None,
+        eval_sampler: Sampler | None = None,
         **dataloader_kwargs: Any,
     ) -> None:
         super().__init__()
         self.dataset_factory = dataset_factory
         self.splits = splits
+        self.train_sampler = train_sampler
+        self.eval_sampler = eval_sampler
         self.dataloader_kwargs = dataloader_kwargs
         validate_splits(self.splits)
 
@@ -126,6 +135,7 @@ class SourceDataDataModule(pl.LightningDataModule):
                     subset_per_split[split_name][coord] = split_val
 
         augment_flags = {"train": True, "val": False, "test": False}
+        sampler_flags = {"train": self.train_sampler, "val": self.eval_sampler, "test": self.eval_sampler}
         for split in ("train", "val", "test"):
             subset = subset_per_split[split]
             if subset is None:
@@ -134,7 +144,7 @@ class SourceDataDataModule(pl.LightningDataModule):
                 setattr(
                     self,
                     f"{split}_dataset",
-                    self.dataset_factory(subset=subset, augment=augment_flags[split]),
+                    self.dataset_factory(subset=subset, augment=augment_flags[split], sampler=sampler_flags[split]),
                 )
 
         logger.info("{}.setup() complete, containing:", self.__class__.__name__)

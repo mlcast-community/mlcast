@@ -1,16 +1,19 @@
 """PyTorch datasets for loading spatio-temporal data from Zarr stores.
 
-Provides pre-computed sampling and (soon) random sampling datasets.
+Provides an indexed dataset (crops from a precomputed index) and a
+random-sampling dataset.
 """
 
 import time
 import warnings
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, TypedDict
 
 import cf_xarray  # noqa: F401
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import torch
 import xarray as xr
 from beartype import beartype
@@ -18,6 +21,25 @@ from jaxtyping import Float, jaxtyped
 from torch.utils.data import Dataset
 
 from mlcast.data.normalization import NORMALIZATION_REGISTRY
+from mlcast.sampling import Sampler
+
+
+def _load_sampling_index(path: str) -> pd.DataFrame:
+    """Load a precomputed sampling index as a DataFrame.
+
+    Accepts a stats parquet (the dataset sampler's output) or a legacy
+    ``.csv``. Returns at least the ``t, x, y`` crop-corner columns, plus the
+    per-datacube ``mean`` column when the file carries it (parquet only) — the
+    latter feeds importance sampling. Only the needed columns are read.
+    """
+    suffix = Path(path).suffix.lower()
+    if suffix == ".csv":
+        return pd.read_csv(path)
+    if suffix in (".parquet", ".pq"):
+        available = set(pq.read_schema(path).names)
+        columns = [c for c in ("t", "x", "y", "mean") if c in available]
+        return pq.read_table(path, columns=columns).to_pandas()
+    raise ValueError(f"Unsupported sampling index format {suffix!r} for {path!r}; expected .parquet or .csv")
 
 
 def _time_range_to_index_slice(
@@ -47,14 +69,16 @@ class DatasetSample(TypedDict, total=False):
         Past frames fed to the network as input.
     target : Float[torch.Tensor, "forecast_steps channels height width"]
         Future frames the network should predict.
-    target_mask : Float[torch.Tensor, "forecast_steps channels height width"]
-        Per-timestep, per-channel validity mask for the target (1 = valid,
-        0 = NaN in original data). Only present when ``return_mask=True``.
+    target_mask : Float[torch.Tensor, "1 channels height width"]
+        Per-cell validity mask collapsed over the whole sequence: a cell is 1
+        only if it was finite at every step (inputs and targets), else 0. Its
+        leading axis is a single step that the loss broadcasts over the forecast
+        steps. Only present when ``return_mask=True``.
     """
 
     input: Float[torch.Tensor, "input_steps channels height width"]
     target: Float[torch.Tensor, "forecast_steps channels height width"]
-    target_mask: Float[torch.Tensor, "forecast_steps channels height width"]
+    target_mask: Float[torch.Tensor, "1 channels height width"]
 
 
 def _detect_axes(ds: xr.Dataset, standard_name: str) -> tuple[str, str, str]:
@@ -275,9 +299,16 @@ class SourceDataDatasetBase(Dataset, ABC):
             Dictionary with ``'input'`` and ``'target'`` tensors, and
             optionally ``'target_mask'`` if ``self.return_mask`` is ``True``.
         """
-        # Capture target mask before NaNs are filled
+        # Validity mask, collapsed over the whole sequence: a cell is scored only
+        # if it is finite at EVERY step (inputs and targets). A temporal
+        # discontinuity anywhere makes the forecast trajectory at that cell
+        # ill-defined — and the temporal-consistency loss term meaningless — so we
+        # mask it for the whole sequence. Kept as (1, C, H, W); the loss broadcasts
+        # it over the forecast steps, so no T copies are materialised on the GPU.
+        # Computed before NaNs are filled below.
         if self.return_mask:
-            target_mask_t = torch.from_numpy((~np.isnan(data[self.input_steps :])).astype(np.float32))
+            valid = ~np.isnan(data).any(axis=0, keepdims=True)  # (1, C, H, W)
+            target_mask_t = torch.from_numpy(valid.astype(np.float32))
 
         # source data may be float64, but the model and the rest of the
         # training pipeline operate in float32.
@@ -311,9 +342,8 @@ class SourceDataDatasetBase(Dataset, ABC):
     def __getitem__(self, idx: int) -> DatasetSample: ...
 
 
-class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
-    """PyTorch dataset that loads spatio-temporal data from a Zarr store using
-    pre-sampled spatial-temporal coordinates from a CSV file.
+class SourceDataIndexedDataset(SourceDataDatasetBase):
+    """PyTorch dataset yielding Zarr crops at locations read from a precomputed index.
 
     Each sample is a spatio-temporal crop of shape ``(T, C, H, W)``
     converted to normalized data.
@@ -322,11 +352,12 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
     ----------
     zarr_path : str
         Path to the Zarr dataset.
-    csv_path : str
-        Path to the CSV file with columns ``(t, x, y)`` specifying the
-        top-left corner of each crop.
+    index_path : str
+        Path to the sampling index of ``(t, x, y)`` crop corners: a stats
+        parquet (the candidate pool, optionally filtered by ``sampler``) or a
+        legacy ``.csv`` (already sampled, used as-is).
     standard_names : list of str
-        List of CF standard names of variables to load (e.g., ``["rainfall_rate"]``).
+        List of CF standard names of variables to load (e.g., ``["rainfall_flux"]``).
     input_steps : int
         Number of past timesteps fed to the network as input.
     forecast_steps : int
@@ -347,12 +378,18 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
         Spatial height of each crop. Default is ``256``.
     time_depth : int, optional
         Number of timesteps in the sampled window. Default is ``24``.
+    sampler : Sampler or None, optional
+        Optional sampler to filter the candidate index with a chosen strategy,
+        applied once at init (see :mod:`mlcast.sampling.samplers`). Default
+        ``None`` keeps every candidate.
+    sampling_seed : int, optional
+        Seed for the sampler's one-time selection. Default ``42``.
     """
 
     def __init__(
         self,
         zarr_path: str,
-        csv_path: str,
+        index_path: str,
         standard_names: list[str],
         input_steps: int,
         forecast_steps: int,
@@ -364,6 +401,8 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
         height: int = 256,
         time_depth: int = 24,
         storage_options: dict[str, Any] | None = None,
+        sampler: Sampler | None = None,
+        sampling_seed: int = 42,
     ) -> None:
         if subset:
             for key in subset:
@@ -389,13 +428,23 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
             storage_options=storage_options,
         )
 
-        self.coords = pd.read_csv(csv_path).sort_values("t")
+        self.coords = _load_sampling_index(index_path).sort_values("t")
         if self._time_index_slice is not None:
             t_start = self._time_index_slice.start
             t_stop = self._time_index_slice.stop
-            self.coords = self.coords[(self.coords["t"] >= t_start) & (self.coords["t"] < t_stop)].reset_index(
-                drop=True
-            )
+            # `t` is an absolute index into the full zarr, but `self.ds` is sliced to
+            # this subset (its time axis is 0-based). Keep only windows whose full
+            # depth fits inside the subset, then rebase `t` onto the sliced axis so
+            # `__getitem__` indexes it correctly and splits don't leak across the
+            # boundary.
+            self.coords = self.coords[
+                (self.coords["t"] >= t_start) & (self.coords["t"] + time_depth <= t_stop)
+            ].reset_index(drop=True)
+            self.coords["t"] = self.coords["t"] - t_start
+
+        if sampler is not None:
+            selected = sampler.select(self.coords, np.random.default_rng(sampling_seed))
+            self.coords = self.coords.iloc[selected].reset_index(drop=True)
 
         self.dt = time_depth
 
@@ -431,7 +480,8 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
             ``(forecast_steps, C, H, W)`` with 1 where the original data was
             valid and 0 where it was NaN.
         """
-        t0, x0, y0 = self.coords.iloc[idx]
+        row = self.coords.iloc[idx]
+        t0, x0, y0 = row["t"], row["x"], row["y"]
 
         x_slice = slice(int(x0), int(x0) + self.w)
         y_slice = slice(int(y0), int(y0) + self.h)
@@ -466,7 +516,7 @@ class SourceDataRandomSamplingDataset(SourceDataDatasetBase):
     zarr_path : str
         Path to the Zarr dataset.
     standard_names : list of str
-        List of CF standard names of variables to load (e.g., ``["rainfall_rate"]``).
+        List of CF standard names of variables to load (e.g., ``["rainfall_flux"]``).
     input_steps : int
         Number of past timesteps fed to the network as input.
     forecast_steps : int
@@ -488,7 +538,7 @@ class SourceDataRandomSamplingDataset(SourceDataDatasetBase):
     epoch_size : int, optional
         Number of random samples to generate per epoch. Default is ``1000``.
     **kwargs : Any
-        Ignored extra arguments (e.g. ``csv_path``) to allow drop-in replacement.
+        Ignored extra arguments (e.g. ``index_path``) to allow drop-in replacement.
     """
 
     def __init__(
