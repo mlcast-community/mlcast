@@ -205,6 +205,13 @@ def _strided_window(
     return s[:, :, 0::step_y]
 
 
+def _dominant_time_step(time_diffs: pd.TimedeltaIndex) -> tuple[pd.Timedelta, float]:
+    """Most frequent step between consecutive frames and its share of all steps."""
+    values, counts = np.unique(time_diffs, return_counts=True)
+    i = int(np.argmax(counts))
+    return pd.Timedelta(values[i]), counts[i] / len(time_diffs)
+
+
 def _process_chunk(
     time_range: tuple[int, int],
     t_start_idx: int,
@@ -461,6 +468,12 @@ def run(args: argparse.Namespace) -> int:
     logger.info(f"Filtered dataset shape: T={size_T}, X={size_X}, Y={size_Y}")
     logger.info(f"Filtered time range: {time_array[0]} to {time_array[-1]}")
     max_t = size_T - Dt + 1
+    if max_t < 1:
+        logger.error(
+            f"The selected time range holds only {size_T} frames but --time-depth is {Dt}: "
+            "no datacube fits. Widen the date range or reduce --time-depth."
+        )
+        return 1
 
     logger.info("Checking time continuity...")
     expected_step = pd.Timedelta(minutes=args.time_step_minutes)
@@ -469,6 +482,27 @@ def run(args: argparse.Namespace) -> int:
     window_sum = np.convolve(gaps, np.ones(Dt - 1, dtype=int), mode="valid")
     valid_starts_gap = np.where(window_sum == 0)[0]
     logger.info(f"Found {len(valid_starts_gap)} valid time starts without gaps")
+    if len(valid_starts_gap) == 0:
+        dominant, share = _dominant_time_step(time_diffs)
+        if dominant != expected_step:
+            dominant_min = dominant / pd.Timedelta(minutes=1)
+            hint = (
+                f"If that is the dataset's real cadence, rerun with --time-step-minutes {dominant_min:g}."
+                if dominant_min == int(dominant_min)
+                else "Set --time-step-minutes to the dataset's real cadence."
+            )
+            logger.error(
+                f"0 gap-free time windows: expecting a {args.time_step_minutes}-min step between "
+                f"frames (--time-step-minutes) but the dominant observed step is {dominant_min:g} min "
+                f"({share:.1%} of {len(time_diffs):,} steps). {hint}"
+            )
+        else:
+            logger.error(
+                f"0 gap-free time windows: the time axis matches the expected "
+                f"{args.time_step_minutes}-min step, but every window of {Dt} frames spans a gap. "
+                "Reduce --time-depth or pick a date range with fewer missing frames."
+            )
+        return 1
     # Boolean lookup over the filtered time axis for an O(1) continuity test
     # per candidate window start.
     valid_start_mask = np.zeros(size_T, dtype=bool)
@@ -610,6 +644,20 @@ def run(args: argparse.Namespace) -> int:
     writer_thread.join()
 
     n_rows = pq.read_metadata(output_file).num_rows
+    if n_rows == 0:
+        console.print(
+            Panel(
+                f"⚠️  0 datacube candidates survived the filters: every {Dt} × {w} × {h} window "
+                f"holds more than max_nan={max_nan:,} NaNs.\n"
+                "The window may be larger than the radar coverage, or the selected period all-NaN. "
+                "Raise --max-nan or shrink --width/--height/--time-depth.\n"
+                f"[dim]💾 {output_file} (empty)[/]",
+                title="[bold yellow]⚠️ stats found nothing[/]",
+                border_style="yellow",
+                expand=False,
+            )
+        )
+        return 1
     console.print(
         Panel(
             f"✅ Wrote [bold]{n_rows:,}[/] datacube candidates "
