@@ -396,8 +396,19 @@ class SourceDataPrecomputedSamplingDataset(SourceDataDatasetBase):
             self.coords = self.coords[(self.coords["t"] >= t_start) & (self.coords["t"] < t_stop)].reset_index(
                 drop=True
             )
+            # adjust the range as the index was reset in the previous line
+            self.coords["t"] = self.coords["t"] - t_start
 
         self.dt = time_depth
+        
+
+        # Open and check max size of sliced zarr
+        with xr.open_zarr(zarr_path, **(storage_options or {})) as raw_ds:
+            max_zarr_steps = (t_stop - t_start) if self._time_index_slice is not None else raw_ds.sizes[self.t_dim]
+
+        # remove any samples that reach into the validation data
+        self.coords = self.coords[self.coords["t"] + self.dt <= max_zarr_steps].reset_index(drop=True)
+
 
         if self.steps > self.dt:
             print(f"Warning: requested steps ({self.steps}) > sampled time window ({self.dt})")
