@@ -74,11 +74,18 @@ class MaskedLoss(LossWithReduction):
         loss : torch.Tensor
             Scalar loss value.
         """
-        elementwise_loss = self.elementwise_loss(preds, target)
-        masked_loss = elementwise_loss * mask
 
-        broadcast_factor = elementwise_loss.numel() // mask.numel()
-        valid_pixels = mask.sum() * broadcast_factor
+        elementwise_loss = self.elementwise_loss(preds, target)
+        
+        # if loss compressed along time dimension, compress the mask in the same way
+        if mask.shape[1] != elementwise_loss.shape[1] and elementwise_loss.shape[1] == 1:
+            mask = mask.mean(dim=1, keepdim=True)
+
+        masked_loss = elementwise_loss * mask
+ 
+        # mask now corresponds to the number of valid pixels
+        valid_pixels = mask.sum()
+
         if valid_pixels > 0:
             if self.reduction == "mean":
                 return masked_loss.sum() / valid_pixels
@@ -87,6 +94,7 @@ class MaskedLoss(LossWithReduction):
             else:
                 return masked_loss
         else:
+            
             logger.warning(
                 "Encountered a training batch with all NaNs (completely masked). "
                 "The loss and gradients for this batch will be exactly zero."
