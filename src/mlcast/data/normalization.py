@@ -167,6 +167,11 @@ class ReflectivityScaling:
             "rainfall_rate": self.rainfall_rate_to_normalized,
             "rainfall_flux": self.rainfall_flux_to_normalized,
             "rainfall_amount": self.rainfall_amount_5min_to_normalized,
+            # Native CF standard name for radar reflectivity in dBZ (e.g.
+            # DMI's `dbz` variable) -- already in the units normalize_reflectivity
+            # expects, unlike the rainfall_* entries above which first convert
+            # through the Marshall-Palmer Z-R relationship.
+            "equivalent_reflectivity_factor": self.normalize_reflectivity,
         }
 
     @property
@@ -176,6 +181,7 @@ class ReflectivityScaling:
             "rainfall_rate": self.normalized_to_rainfall_rate,
             "rainfall_flux": self.normalized_to_rainfall_flux,
             "rainfall_amount": self.normalized_to_rainfall_amount_5min,
+            "equivalent_reflectivity_factor": self.denormalize_reflectivity,
         }
 
 
