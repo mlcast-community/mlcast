@@ -120,10 +120,17 @@ class ReflectivityScaling:
         return self.reflectivity_to_rainfall_rate(reflectivity)
 
     def normalize_reflectivity(self, reflectivity: np.ndarray) -> np.ndarray:
-        """Normalize reflectivity from [dbz_floor, dbz_ceiling] dBZ to [norm_min, norm_max]."""
+        """Normalize reflectivity from [dbz_floor, dbz_ceiling] dBZ to [norm_min, norm_max].
+
+        Values outside ``[dbz_floor, dbz_ceiling]`` are clipped first, so the
+        output stays within ``[norm_min, norm_max]``. Without this, sentinels
+        below the floor (e.g. DMI's -32 dBZ "no echo") landed outside the
+        model's reachable output range. NaN inputs propagate untouched.
+        """
         dbz_span = self.dbz_ceiling - self.dbz_floor
         norm_span = self.norm_max - self.norm_min
-        return self.norm_min + (reflectivity - self.dbz_floor) * (norm_span / dbz_span)
+        clipped = np.clip(reflectivity, self.dbz_floor, self.dbz_ceiling)
+        return self.norm_min + (clipped - self.dbz_floor) * (norm_span / dbz_span)
 
     def denormalize_reflectivity(self, normalized: np.ndarray) -> np.ndarray:
         """Denormalize from [norm_min, norm_max] back to [dbz_floor, dbz_ceiling] dBZ."""
