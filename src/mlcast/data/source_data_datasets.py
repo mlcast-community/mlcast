@@ -21,13 +21,13 @@ from jaxtyping import Float, jaxtyped
 from torch.utils.data import Dataset
 
 from mlcast.data.normalization import NORMALIZATION_REGISTRY
-from mlcast.sampling import Sampler
+from mlcast.data.source_data.sampling import CandidateSelector
 
 
 def _load_sampling_index(path: str) -> pd.DataFrame:
     """Load a precomputed sampling index as a DataFrame.
 
-    Accepts a stats parquet (the dataset sampler's output) or a legacy
+    Accepts a sampling index (``mlcast build-sampling-index`` output) or a legacy
     ``.csv``. Returns at least the ``t, x, y`` crop-corner columns, plus the
     per-datacube ``mean`` column when the file carries it (parquet only) — the
     latter feeds importance sampling. Only the needed columns are read.
@@ -353,8 +353,8 @@ class SourceDataIndexedDataset(SourceDataDatasetBase):
     zarr_path : str
         Path to the Zarr dataset.
     index_path : str
-        Path to the sampling index of ``(t, x, y)`` crop corners: a stats
-        parquet (the candidate pool, optionally filtered by ``sampler``) or a
+        Path to the sampling index of ``(t, x, y)`` crop corners: a
+        parquet (the candidate pool, optionally filtered by ``selector``) or a
         legacy ``.csv`` (already sampled, used as-is).
     standard_names : list of str
         List of CF standard names of variables to load (e.g., ``["rainfall_flux"]``).
@@ -378,12 +378,12 @@ class SourceDataIndexedDataset(SourceDataDatasetBase):
         Spatial height of each crop. Default is ``256``.
     time_depth : int, optional
         Number of timesteps in the sampled window. Default is ``24``.
-    sampler : Sampler or None, optional
-        Optional sampler to filter the candidate index with a chosen strategy,
-        applied once at init (see :mod:`mlcast.sampling.samplers`). Default
+    selector : CandidateSelector or None, optional
+        Optional selector to filter the candidate index with a chosen strategy,
+        applied once at init (see :mod:`mlcast.data.source_data.sampling.selection`). Default
         ``None`` keeps every candidate.
-    sampling_seed : int, optional
-        Seed for the sampler's one-time selection. Default ``42``.
+    selection_seed : int, optional
+        Seed for the selector's one-time selection. Default ``42``.
     """
 
     def __init__(
@@ -401,8 +401,8 @@ class SourceDataIndexedDataset(SourceDataDatasetBase):
         height: int = 256,
         time_depth: int = 24,
         storage_options: dict[str, Any] | None = None,
-        sampler: Sampler | None = None,
-        sampling_seed: int = 42,
+        selector: CandidateSelector | None = None,
+        selection_seed: int = 42,
     ) -> None:
         if subset:
             for key in subset:
@@ -428,7 +428,7 @@ class SourceDataIndexedDataset(SourceDataDatasetBase):
             storage_options=storage_options,
         )
 
-        self.coords = _load_sampling_index(index_path).sort_values("t")
+        self.candidates = _load_sampling_index(index_path).sort_values("t")
         if self._time_index_slice is not None:
             t_start = self._time_index_slice.start
             t_stop = self._time_index_slice.stop
@@ -437,14 +437,14 @@ class SourceDataIndexedDataset(SourceDataDatasetBase):
             # depth fits inside the subset, then rebase `t` onto the sliced axis so
             # `__getitem__` indexes it correctly and splits don't leak across the
             # boundary.
-            self.coords = self.coords[
-                (self.coords["t"] >= t_start) & (self.coords["t"] + time_depth <= t_stop)
+            self.candidates = self.candidates[
+                (self.candidates["t"] >= t_start) & (self.candidates["t"] + time_depth <= t_stop)
             ].reset_index(drop=True)
-            self.coords["t"] = self.coords["t"] - t_start
+            self.candidates["t"] = self.candidates["t"] - t_start
 
-        if sampler is not None:
-            selected = sampler.select(self.coords, np.random.default_rng(sampling_seed))
-            self.coords = self.coords.iloc[selected].reset_index(drop=True)
+        if selector is not None:
+            selected = selector.select(self.candidates, np.random.default_rng(selection_seed))
+            self.candidates = self.candidates.iloc[selected].reset_index(drop=True)
 
         self.dt = time_depth
 
@@ -464,7 +464,7 @@ class SourceDataIndexedDataset(SourceDataDatasetBase):
         length : int
             Number of samples.
         """
-        return len(self.coords)
+        return len(self.candidates)
 
     @jaxtyped(typechecker=beartype)
     def __getitem__(self, idx: int) -> DatasetSample:
@@ -480,7 +480,7 @@ class SourceDataIndexedDataset(SourceDataDatasetBase):
             ``(forecast_steps, C, H, W)`` with 1 where the original data was
             valid and 0 where it was NaN.
         """
-        row = self.coords.iloc[idx]
+        row = self.candidates.iloc[idx]
         t0, x0, y0 = row["t"], row["x"], row["y"]
 
         x_slice = slice(int(x0), int(x0) + self.w)

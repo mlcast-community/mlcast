@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from mlcast.sampling.commands.stats import (
+from mlcast.data.source_data.sampling.commands.build_sampling_index import (
     _datacube_window_sum,
     _process_chunk,
 )

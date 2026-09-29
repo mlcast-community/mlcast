@@ -5,9 +5,9 @@ import pandas as pd
 import pytest
 from torch.utils.data import DataLoader, Dataset
 
+from mlcast.data.source_data.sampling import UniformSelector
 from mlcast.data.source_data_datamodule import SourceDataDataModule
 from mlcast.data.splits import splitting_uses_fractions, splitting_uses_tuple_ranges, validate_splits
-from mlcast.sampling import UniformSampler
 
 
 class MockDataset(Dataset):
@@ -332,22 +332,22 @@ def test_data_module_unsupported_split_mode() -> None:
         dm.setup()
 
 
-def test_data_module_injects_train_sampler_only_on_train() -> None:
-    """train gets train_sampler; val/test get eval_sampler (representative)."""
-    train_s = UniformSampler(keep_fraction=0.5)
-    eval_s = UniformSampler(keep_fraction=1.0)
+def test_data_module_injects_train_selector_only_on_train() -> None:
+    """train gets train_selector; val/test get eval_selector (representative)."""
+    train_s = UniformSelector(keep_fraction=0.5)
+    eval_s = UniformSelector(keep_fraction=1.0)
     time_index = _make_time_index(100)
     dm = SourceDataDataModule(
         dataset_factory=functools.partial(MockDataset, zarr_path="mock.zarr"),
         splits={"time": {"train": 0.5, "val": 0.2, "test": 0.3}},
-        train_sampler=train_s,
-        eval_sampler=eval_s,
+        train_selector=train_s,
+        eval_selector=eval_s,
         batch_size=2,
     )
 
     with patch("mlcast.data.splits.xr.open_zarr", return_value=_mock_zarr(time_index)):
         dm.setup()
 
-    assert dm.train_dataset.kwargs["sampler"] is train_s
-    assert dm.val_dataset.kwargs["sampler"] is eval_s
-    assert dm.test_dataset.kwargs["sampler"] is eval_s
+    assert dm.train_dataset.kwargs["selector"] is train_s
+    assert dm.val_dataset.kwargs["selector"] is eval_s
+    assert dm.test_dataset.kwargs["selector"] is eval_s

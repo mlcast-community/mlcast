@@ -34,8 +34,8 @@ if TYPE_CHECKING:
     from rich.text import Text
 
 # The training stack (torch, Fiddle, absl, the model/data config) is heavy, so
-# it is imported only on the `train` path; `mlcast -h`, `mlcast stats`, and
-# `mlcast validate-stats` stay fast. These globals are populated by
+# it is imported only on the `train` path; `mlcast -h`, `mlcast build-sampling-index`, and
+# `mlcast validate-sampling-index` stay fast. These globals are populated by
 # `_define_train_flags()`, called from `cli()` for the `train` command.
 FLAGS = None
 _config = None
@@ -369,17 +369,17 @@ def train_main(argv: list[str]) -> None:
 
 
 def _run_sampling_command(name: str, remaining: list[str]) -> None:
-    """Dispatch the data-prep subcommands (``stats`` / ``validate-stats``).
+    """Dispatch the data-prep subcommands (``build-sampling-index`` / ``validate-sampling-index``).
 
     Imported lazily to keep ``mlcast train`` startup light.
     """
     from loguru import logger
 
-    from mlcast.sampling import commands
+    from mlcast.data.source_data.sampling import commands
 
     logger.remove()
     logger.add(sys.stderr, level="INFO")
-    module = commands.stats if name == "stats" else commands.validate_stats
+    module = commands.build_sampling_index if name == "build-sampling-index" else commands.validate_sampling_index
     sub = argparse.ArgumentParser(prog=f"mlcast {name}")
     module.add_arguments(sub)
     sys.exit(module.run(sub.parse_args(remaining)))
@@ -416,14 +416,14 @@ def cli() -> None:
     # command modules are imported lazily in the dispatch below to keep
     # `mlcast train` startup light.
     subparsers.add_parser(
-        "stats",
+        "build-sampling-index",
         add_help=False,
-        help="Scan a Zarr dataset and write per-datacube stats to parquet.",
+        help="Scan a Zarr dataset and write a sampling index (candidate datacubes + sample stats).",
     )
     subparsers.add_parser(
-        "validate-stats",
+        "validate-sampling-index",
         add_help=False,
-        help="Validate a stats parquet file against the canonical contract.",
+        help="Validate a sampling index against the canonical contract.",
     )
 
     args, remaining = parser.parse_known_args()
@@ -456,7 +456,7 @@ def cli() -> None:
             _seed_fiddle_flag_from_yaml(yaml_path)
 
         app.run(train_main, argv=[sys.argv[0]] + remaining)
-    elif args.command in ("stats", "validate-stats"):
+    elif args.command in ("build-sampling-index", "validate-sampling-index"):
         _run_sampling_command(args.command, remaining)
 
 

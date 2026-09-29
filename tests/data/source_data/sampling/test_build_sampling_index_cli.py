@@ -1,6 +1,6 @@
-"""Failure-mode tests for the `stats` command's `run()` entry point.
+"""Failure-mode tests for the `build-sampling-index` command's `run()` entry point.
 
-A stats run that can produce no candidates must fail loudly (non-zero exit)
+A build that can produce no candidates must fail loudly (non-zero exit)
 instead of silently writing an empty parquet — the classic trigger being a
 dataset whose cadence differs from --time-step-minutes (e.g. 10-minute DMI
 data against the 5-minute default), where the continuity filter rejects
@@ -18,7 +18,7 @@ import pyarrow.parquet as pq
 import pytest
 import xarray as xr
 
-from mlcast.sampling.commands.stats import add_arguments, run
+from mlcast.data.source_data.sampling.commands.build_sampling_index import add_arguments, run
 
 T_TOTAL = 30
 

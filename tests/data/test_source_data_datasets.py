@@ -8,12 +8,12 @@ import pytest
 import torch
 import xarray as xr
 
+from mlcast.data.source_data.sampling import ImportanceSelector, UniformSelector
+from mlcast.data.source_data.sampling.sampling_index_spec import SamplingParameters, build_schema
 from mlcast.data.source_data_datasets import (
     SourceDataIndexedDataset,
     SourceDataRandomSamplingDataset,
 )
-from mlcast.sampling import ImportanceSampler, UniformSampler
-from mlcast.sampling.stats_spec import StatsMetadata, build_schema
 
 
 @pytest.fixture
@@ -33,8 +33,8 @@ def mock_csv(tmp_path: Path) -> str:
 
 @pytest.fixture
 def mock_parquet(tmp_path: Path) -> str:
-    """Create a temporary stats parquet (the sampler's output) with a mean column."""
-    meta = StatsMetadata(
+    """Create a temporary sampling index (build-sampling-index output) with a mean column."""
+    meta = SamplingParameters(
         zarr_path="dummy.zarr",
         data_var="RR",
         time_var="time",
@@ -70,7 +70,7 @@ def mock_parquet(tmp_path: Path) -> str:
 
 
 def test_indexed_sampling_dataset_parquet(fp_test_dataset: Path, mock_parquet: str) -> None:
-    """Reads a stats parquet index; with no sampler the full pool is used."""
+    """Reads a sampling index; with no selector the full pool is used."""
     ds = SourceDataIndexedDataset(
         zarr_path=str(fp_test_dataset),
         index_path=mock_parquet,
@@ -89,7 +89,7 @@ def test_indexed_sampling_dataset_parquet(fp_test_dataset: Path, mock_parquet: s
 
 
 def test_indexed_importance_selection_is_fixed_and_keeps_extremes(fp_test_dataset: Path, mock_parquet: str) -> None:
-    """ImportanceSampler selects a fixed, reproducible subset that keeps extremes."""
+    """ImportanceSelector selects a fixed, reproducible subset that keeps extremes."""
     kwargs = dict(
         zarr_path=str(fp_test_dataset),
         index_path=mock_parquet,
@@ -98,21 +98,21 @@ def test_indexed_importance_selection_is_fixed_and_keeps_extremes(fp_test_datase
         forecast_steps=1,
         width=16,
         height=16,
-        sampler=ImportanceSampler(),
-        sampling_seed=0,
+        selector=ImportanceSelector(),
+        selection_seed=0,
     )
     ds = SourceDataIndexedDataset(**kwargs)
 
     # a subset of the 3 candidates, with the wettest (t=10) always kept
     assert 1 <= len(ds) <= 3
-    assert 10 in ds.coords["t"].to_numpy()
+    assert 10 in ds.candidates["t"].to_numpy()
     # reproducible: same seed -> identical kept set
     ds2 = SourceDataIndexedDataset(**kwargs)
-    assert np.array_equal(ds.coords["t"].to_numpy(), ds2.coords["t"].to_numpy())
+    assert np.array_equal(ds.candidates["t"].to_numpy(), ds2.candidates["t"].to_numpy())
 
 
-def test_indexed_importance_sampler_requires_mean_column(fp_test_dataset: Path, mock_csv: str) -> None:
-    """ImportanceSampler rejects a CSV index that has no mean column."""
+def test_indexed_importance_selector_requires_mean_column(fp_test_dataset: Path, mock_csv: str) -> None:
+    """ImportanceSelector rejects a CSV index that has no mean column."""
     with pytest.raises(ValueError, match="mean"):
         SourceDataIndexedDataset(
             zarr_path=str(fp_test_dataset),
@@ -122,12 +122,12 @@ def test_indexed_importance_sampler_requires_mean_column(fp_test_dataset: Path, 
             forecast_steps=1,
             width=16,
             height=16,
-            sampler=ImportanceSampler(),
+            selector=ImportanceSelector(),
         )
 
 
-def test_indexed_uniform_sampler_works_on_csv(fp_test_dataset: Path, mock_csv: str) -> None:
-    """A non-importance sampler (uniform) needs no mean column, so works on a CSV."""
+def test_indexed_uniform_selector_works_on_csv(fp_test_dataset: Path, mock_csv: str) -> None:
+    """A non-importance selector (uniform) needs no mean column, so works on a CSV."""
     ds = SourceDataIndexedDataset(
         zarr_path=str(fp_test_dataset),
         index_path=mock_csv,
@@ -136,7 +136,7 @@ def test_indexed_uniform_sampler_works_on_csv(fp_test_dataset: Path, mock_csv: s
         forecast_steps=1,
         width=16,
         height=16,
-        sampler=UniformSampler(keep_fraction=1.0),
+        selector=UniformSelector(keep_fraction=1.0),
     )
     assert len(ds) == 3  # keep_fraction=1.0 -> the whole (3-row) index
 
@@ -192,7 +192,7 @@ def test_indexed_sampling_dataset_time_subset(fp_test_dataset: Path, mock_csv: s
         subset={"time": (str(time_index[3]), str(time_index[20]))},
     )
     assert len(ds) == 2
-    assert sorted(ds.coords["t"].tolist()) == [2, 7]
+    assert sorted(ds.candidates["t"].tolist()) == [2, 7]
 
 
 def test_indexed_sampling_dataset_forecast_steps_guard(fp_test_dataset: Path, mock_csv: str) -> None:

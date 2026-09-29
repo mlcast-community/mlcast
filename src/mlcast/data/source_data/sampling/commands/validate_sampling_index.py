@@ -1,6 +1,6 @@
-"""Validate a stats parquet file against the canonical contract.
+"""Validate a sampling index against the canonical contract.
 
-Thin CLI wrapper over :func:`stats_spec.validate_stats_parquet`. Checks the
+Thin CLI wrapper over :func:`sampling_index_spec.validate_sampling_index`. Checks the
 column schema and metadata payload, and (unless ``--no-data-checks``) the
 per-row value invariants.
 """
@@ -15,12 +15,12 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ..console import console
-from ..stats_spec import read_metadata, validate_stats_parquet
+from ..sampling_index_spec import read_sampling_parameters, validate_sampling_index
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add validate-stats specific arguments to the parser."""
-    parser.add_argument("parquet_path", type=str, help="Path to the stats parquet file.")
+    """Add validate-sampling-index specific arguments to the parser."""
+    parser.add_argument("parquet_path", type=str, help="Path to the sampling index (parquet file).")
     parser.add_argument(
         "--no-data-checks",
         action="store_true",
@@ -30,7 +30,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _summary_grid(path: str) -> Table:
     """Compact grid of the file's key parameters, shown on success."""
-    meta = read_metadata(path)
+    meta = read_sampling_parameters(path)
     grid = Table.grid(padding=(0, 2))
     grid.add_column(justify="right", style="bold cyan")
     grid.add_column()
@@ -99,15 +99,15 @@ def _preview_table(path: str, n: int = 10) -> Table:
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the validate-stats command."""
+    """Execute the validate-sampling-index command."""
     path = args.parquet_path
-    report = validate_stats_parquet(path, check_data=not args.no_data_checks)
+    report = validate_sampling_index(path, check_data=not args.no_data_checks)
 
     if report.ok and not report.warnings:
         console.print(
             Panel(
                 _summary_grid(path),
-                title="[bold green]✅ valid stats parquet[/]",
+                title="[bold green]✅ valid sampling index[/]",
                 subtitle=f"[dim]{path}[/]",
                 border_style="green",
                 expand=False,

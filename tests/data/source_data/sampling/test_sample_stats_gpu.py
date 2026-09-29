@@ -1,6 +1,6 @@
 """GPU backend tests — skipped unless torch + a CUDA GPU are available.
 
-Validates the torch `_stats_gpu.process_chunk` against the CPU
+Validates the torch `_sample_stats_gpu.process_chunk` against the CPU
 `_process_chunk` and the independent brute-force oracle: integer columns
 exact, float sum/mean to ``allclose`` (GPU float reduction order differs).
 """
@@ -12,10 +12,10 @@ import pytest
 import torch
 
 # Reuse the CPU test's data generator, brute force, lexsort, and cases.
-from test_stats_process import CASES, _brute_force, _lexsort, _make_data
+from test_build_sampling_index_process import CASES, _brute_force, _lexsort, _make_data
 
-from mlcast.sampling.commands import _stats_gpu
-from mlcast.sampling.commands.stats import _process_chunk
+from mlcast.data.source_data.sampling.commands import _sample_stats_gpu
+from mlcast.data.source_data.sampling.commands.build_sampling_index import _process_chunk
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="no CUDA GPU available")
 
@@ -31,7 +31,7 @@ def test_gpu_matches_cpu_and_brute(seed, deltas, steps, max_nan, wet_thr, start_
     chunk = data[start_t + t_start_idx : end_t + t_start_idx, :, :].astype(np.float32)  # snapshot
 
     gpu = _lexsort(
-        _stats_gpu.process_chunk(
+        _sample_stats_gpu.process_chunk(
             (start_t, end_t),
             t_start_idx,
             chunk,

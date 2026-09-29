@@ -1,13 +1,13 @@
-"""Per-datacube statistics via cumsum-based sliding windows.
+"""Build a sampling index: candidate datacubes plus their sample stats.
 
 Scans a Zarr dataset for valid datacube candidates and computes, for each
 one, `nan_count`, `sum`, `mean`, and `frac_wet`, each in O(1) per window
 amortized via a prefix-sum (cumsum) trick. The survivors (those passing
-the `max_nan`, stride, and time-continuity filters) are written to a stats
-parquet whose contract is defined in `stats_spec`. Downstream,
-`SourceDataIndexedDataset` reads this parquet and an `ImportanceSampler`
-(see `samplers`) selects candidates by the `mean` column; no separate
-sampling pass is needed.
+the `max_nan`, stride, and time-continuity filters) are written to a
+sampling index (a parquet file) whose contract is defined in
+`sampling_index_spec`. Downstream, `SourceDataIndexedDataset` reads the index
+and an `ImportanceSelector` (see `selection`) selects candidates by the `mean`
+column; no separate sampling pass is needed.
 
 Heavy stats that cannot be computed with cumsum (max, quantiles) are out
 of scope here and could be added as extra columns in a future pass.
@@ -46,7 +46,7 @@ from rich.progress import (
 from rich.table import Table
 
 from ..console import console
-from ..stats_spec import STAT_COLUMNS, StatsMetadata, build_schema
+from ..sampling_index_spec import SAMPLING_INDEX_COLUMNS, SamplingParameters, build_schema
 from ..units import default_wet_threshold, detect_data_kind
 
 if TYPE_CHECKING:
@@ -226,7 +226,7 @@ def _process_chunk(
 
     Returns the survivors — windows passing the `max_nan`, stride, and
     time-continuity filters — with their `nan_count`, `sum`, `mean`, and
-    `frac_wet`, as a dict of numpy arrays matching `STATS_SCHEMA`.
+    `frac_wet`, as a dict of numpy arrays matching `SAMPLING_INDEX_SCHEMA`.
 
     The three reductions (nan_count, sum, wet_count) are each computed with
     `_strided_window` and freed before the next, keeping peak memory near a
@@ -302,8 +302,8 @@ def _parquet_writer(
     Each queue item is the dict returned by `_process_chunk`. We buffer
     into Arrow RecordBatches and append to a single ParquetWriter so the
     on-disk file stays a single self-contained parquet. `schema` is the
-    canonical STATS_SCHEMA with the mlcast sampling parameters attached as
-    metadata (see `stats_spec.build_schema`), so downstream commands don't
+    canonical SAMPLING_INDEX_SCHEMA with the mlcast sampling parameters attached as
+    metadata (see `sampling_index_spec.build_schema`), so downstream commands don't
     need to parse the filename.
     """
     # Column encodings tuned to the data: `t` is written in ascending order so
@@ -331,7 +331,7 @@ def _parquet_writer(
             if item["t"].size == 0:
                 continue
             batch = pa.record_batch(
-                [pa.array(item[c]) for c in STAT_COLUMNS],
+                [pa.array(item[c]) for c in SAMPLING_INDEX_COLUMNS],
                 schema=schema,
             )
             writer.write_batch(batch)
@@ -391,7 +391,7 @@ def _prefetched(read_fn, items, lookahead: int, n_workers: int):
 
 
 def run(args: argparse.Namespace) -> int:
-    """Execute the stats command."""
+    """Execute the build-sampling-index command."""
     start_time = time.time()
     Dt = args.time_depth
     w = args.width
@@ -525,13 +525,13 @@ def run(args: argparse.Namespace) -> int:
     if args.output:
         output_file = args.output
     else:
-        output_file = f"stats_{start_str}-{end_str}_{Dt}x{w}x{h}_{step_T}x{step_X}x{step_Y}_{max_nan}.parquet"
+        output_file = f"sampling_index_{start_str}-{end_str}_{Dt}x{w}x{h}_{step_T}x{step_X}x{step_Y}_{max_nan}.parquet"
     if os.path.exists(output_file) and not args.overwrite:
         logger.error(f"File {output_file} already exists. Use --overwrite to replace.")
         return 1
     logger.info(f"Output file: {output_file}")
 
-    metadata = StatsMetadata(
+    metadata = SamplingParameters(
         zarr_path=args.zarr_path,
         data_var=args.data_var,
         time_var=args.time_var,
@@ -570,7 +570,7 @@ def run(args: argparse.Namespace) -> int:
     console.print(
         Panel(
             cfg,
-            title="[bold]📊 mlcast stats[/]",
+            title="[bold]📊 mlcast build-sampling-index[/]",
             subtitle=f"[dim]{os.path.basename(args.zarr_path)}[/]",
             border_style="blue",
             expand=False,
@@ -595,7 +595,7 @@ def run(args: argparse.Namespace) -> int:
     if device == "cuda":
         import torch
 
-        from . import _stats_gpu
+        from . import _sample_stats_gpu
 
         dev = torch.device("cuda")
 
@@ -609,7 +609,7 @@ def run(args: argparse.Namespace) -> int:
             for time_range, chunk_np in _prefetched(
                 _read_chunk, t_pairs, lookahead=n_workers + 2, n_workers=max(1, n_workers)
             ):
-                hits = _stats_gpu.process_chunk(
+                hits = _sample_stats_gpu.process_chunk(
                     time_range,
                     t_start_idx,
                     chunk_np,

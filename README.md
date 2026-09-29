@@ -136,9 +136,10 @@ mlcast train --config fiddler:use_random_sampler --print_config_and_exit
 
 Run `mlcast train --help` for a full list of examples and available fiddlers.
 
-Beyond training, the CLI provides two data-prep subcommands — `mlcast stats`
-and `mlcast validate-stats` — for building and checking the datacube index that
-training reads. See [Preparing training data](#preparing-training-data).
+Beyond training, the CLI provides two data-prep subcommands —
+`mlcast build-sampling-index` and `mlcast validate-sampling-index` — for building
+and checking the sampling index that training reads. See
+[Preparing training data](#preparing-training-data).
 
 ### Python API
 
@@ -266,36 +267,40 @@ experiment.run()              # trainer.fit() + trainer.test()
 
 ## Preparing training data
 
-Training reads a **stats parquet**: a precomputed index of candidate datacubes —
-fixed-size `time_depth × width × height` crops of a source radar Zarr — each
-tagged with per-cube statistics (`nan_count`, `sum`, `mean`, `frac_wet`). The
-training dataset [`SourceDataIndexedDataset`](src/mlcast/data/source_data_datasets.py)
-iterates this index (it is the dataset factory's `index_path`), and a **sampler**
-reshapes the candidate pool at dataset init. The producer, the schema, and the
-samplers all live in [`mlcast.sampling`](src/mlcast/sampling/); two CLI
-subcommands build and check the file.
+Training reads a **sampling index**: a parquet file listing every candidate
+datacube — a fixed-size `time_depth × width × height` crop of a source radar
+Zarr — together with its **sample stats** (`nan_count`, `sum`, `mean`,
+`frac_wet`), while the **sampling parameters** used to build it are stored in
+the file's metadata. The training dataset
+[`SourceDataIndexedDataset`](src/mlcast/data/source_data_datasets.py) iterates
+this index (it is the dataset factory's `index_path`), and a **candidate
+selector** picks the training subset at dataset init. The index builder, its
+contract, and the selectors all live in
+[`mlcast.data.source_data.sampling`](src/mlcast/data/source_data/sampling/);
+two CLI subcommands build and check the index.
 
-### `mlcast stats` — scan a Zarr dataset → stats parquet
+### `mlcast build-sampling-index` — scan a Zarr dataset → sampling index
 
 Slides a window over the `(time, x, y)` grid and, for every candidate datacube,
-computes its statistics in O(1) per window via a cumulative-sum trick. Windows
-are filtered by a maximum-NaN budget, a spatial/temporal stride, and
+computes its sample stats in O(1) per window via a cumulative-sum trick.
+Windows are filtered by a maximum-NaN budget, a spatial/temporal stride, and
 time-continuity (no frame gaps); the survivors are streamed to a single
-zstd-compressed parquet whose footer carries every parameter as metadata (the
-contract in [`stats_spec`](src/mlcast/sampling/stats_spec.py)), so downstream
-commands never have to parse the filename.
+zstd-compressed parquet whose footer carries every sampling parameter as
+metadata (the contract in
+[`sampling_index_spec`](src/mlcast/data/source_data/sampling/sampling_index_spec.py)),
+so downstream commands never have to parse the filename.
 
 ```bash
 # A year of radar → 24-frame 256×256 datacubes, stride 3×16×16
-mlcast stats /data/radar.zarr \
+mlcast build-sampling-index /data/radar.zarr \
     --start-date 2020-01-01 --end-date 2020-12-31 \
     --time-depth 24 --width 256 --height 256 \
     --step-t 3 --step-x 16 --step-y 16 \
     --max-nan 10000 \
-    -o stats_2020.parquet
+    -o sampling_index_2020.parquet
 ```
 
-Common flags (`mlcast stats -h` lists them all):
+Common flags (`mlcast build-sampling-index -h` lists them all):
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -308,45 +313,46 @@ Common flags (`mlcast stats -h` lists them all):
 | `--data-var` / `--time-var` | RR / time | Names of the Zarr data and time variables |
 | `-o` / `--output` | auto | Output path; auto-named from the parameters if omitted |
 
-### `mlcast validate-stats` — check a parquet against the contract
+### `mlcast validate-sampling-index` — check an index against the contract
 
-Checks a stats parquet's column schema, metadata payload, and (unless
-`--no-data-checks`) its per-row value invariants, then prints the file's
-parameters, its table structure, and a preview of the first 10 rows.
+Checks a sampling index's column schema, sampling parameters, and (unless
+`--no-data-checks`) its per-row value invariants, then prints the parameters,
+the table structure, and a preview of the first 10 rows.
 
 ```bash
-mlcast validate-stats stats_2020.parquet
+mlcast validate-sampling-index sampling_index_2020.parquet
 
-# Footer only — schema + metadata, skip the per-row checks
-mlcast validate-stats stats_2020.parquet --no-data-checks
+# Footer only — schema + sampling parameters, skip the per-row checks
+mlcast validate-sampling-index sampling_index_2020.parquet --no-data-checks
 ```
 
-### Samplers
+### Candidate selectors
 
 At training time [`SourceDataDataModule`](src/mlcast/data/source_data_datamodule.py)
-applies a `Sampler` to the index **once**, at dataset init, turning the full
-candidate pool into the training set via a per-row keep/discard draw — so the
-dataset length is fixed and known up front, and the same set is reused every
-epoch. Samplers are pluggable through a registry in
-[`mlcast.sampling`](src/mlcast/sampling/samplers.py):
+applies a `CandidateSelector` to the index **once**, at dataset init, turning
+the full candidate pool into the training set via a per-row keep/discard draw —
+so the dataset length is fixed and known up front, and the same set is reused
+every epoch (candidates are not re-drawn). Selectors are pluggable through a
+registry in [`selection`](src/mlcast/data/source_data/sampling/selection.py):
 
-| Sampler | Parameters | What it does |
-|---------|------------|--------------|
-| `UniformSampler` | `keep_fraction` | Keep each candidate with a fixed probability, independent of its stats |
-| `ImportanceSampler` | `column`, `q_min`, `scale`, `mean_weight` | Keep each candidate with probability rising with one of its statistic columns (`mean` by default) — oversampling high-rainfall datacubes without duplication |
+| Selector | Parameters | What it does |
+|----------|------------|--------------|
+| `UniformSelector` | `keep_fraction` | Keep each candidate with a fixed probability, independent of its stats |
+| `ImportanceSelector` | `column`, `q_min`, `scale`, `mean_weight` | Keep each candidate with probability rising with one of its sample stats (`mean` by default) — oversampling high-rainfall datacubes without duplication |
 
-The default config applies an `ImportanceSampler` to the **train** split and a
-`UniformSampler(keep_fraction=0.1)` to **val/test**, so importance sampling
+The default config sets `train_selector=ImportanceSelector()` and
+`eval_selector=UniformSelector(keep_fraction=0.1)`, so importance sampling
 reshapes only training while validation and test stay representative. Add a
-scheme by subclassing `Sampler`, decorating it with `@register_sampler("name")`,
-and selecting it from a config via `get_sampler("name", ...)`.
+scheme by subclassing `CandidateSelector`, decorating it with
+`@register_selector("name")`, and selecting it from a config via
+`get_selector("name", ...)`.
 
 ## Project Structure
 
 ```
 mlcast/
 ├── src/mlcast/
-│   ├── __main__.py                      # CLI entry point (train / stats / validate-stats)
+│   ├── __main__.py                      # CLI entry point (train / build-sampling-index / validate-sampling-index)
 │   ├── nowcasting_module.py             # Generic Lightning module for nowcasting
 │   ├── losses.py                        # CRPS, AFCRPS, MSE loss functions
 │   ├── callbacks.py                     # Training callbacks
@@ -359,13 +365,13 @@ mlcast/
 │   │   └── orchestrator.py             # train_from_config, config persistence
 │   ├── data/
 │   │   ├── source_data_datamodule.py    # Lightning DataModule
-│   │   ├── source_data_datasets.py      # Zarr-backed PyTorch datasets (reads the stats index)
-│   │   └── normalization.py             # Normalisation registry
-│   ├── sampling/                        # Data-prep: stats parquet producer + sampler registry
-│   │   ├── commands/                    # stats / validate-stats CLI implementations
-│   │   ├── samplers.py                  # Sampler registry (uniform, importance)
-│   │   ├── stats_spec.py                # Stats parquet schema + validation (the contract)
-│   │   └── units.py                     # Data-kind + wet-threshold detection
+│   │   ├── source_data_datasets.py      # Zarr-backed PyTorch datasets (read the sampling index)
+│   │   ├── normalization.py             # Normalisation registry
+│   │   └── source_data/sampling/        # Data-prep: sampling index builder + candidate selectors
+│   │       ├── commands/                # build-sampling-index / validate-sampling-index CLI
+│   │       ├── selection.py             # Candidate selector registry (uniform, importance)
+│   │       ├── sampling_index_spec.py   # Sampling index schema + validation (the contract)
+│   │       └── units.py                 # Data-kind + wet-threshold detection
 │   └── models/
 │       └── convgru.py                   # ConvGRU encoder-decoder
 ├── tests/
