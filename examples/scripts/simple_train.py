@@ -6,7 +6,7 @@ experiments. For CLI usage with arbitrary overrides, use::
     python -m mlcast train \\
         --config config:convgru_experiment \\
         --config set:data.zarr_path=/path/to/data.zarr \\
-        --config set:data.csv_path=/path/to/sampled.csv \\
+        --config set:data.index_path=/path/to/sampled.parquet \\
         --config set:data.batch_size=32 \\
         --config set:trainer.max_epochs=50
 """
@@ -20,7 +20,7 @@ def main():
     # Get the config graph — all parameters are overridable via dot-access
     cfg = convgru_experiment.as_buildable(
         zarr_path="/path/to/data.zarr",
-        csv_path="/path/to/sampled.csv",
+        index_path="/path/to/sampled.parquet",
         variable_name="RR",
     )
 

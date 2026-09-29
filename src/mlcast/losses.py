@@ -77,6 +77,9 @@ class MaskedLoss(LossWithReduction):
         elementwise_loss = self.elementwise_loss(preds, target)
         masked_loss = elementwise_loss * mask
 
+        # The mask is expected to broadcast into the (equal-or-larger) elementwise
+        # loss — e.g. a sequence-collapsed (1, C, H, W) mask over a (T, C, H, W)
+        # loss — so each mask element accounts for `broadcast_factor` loss elements.
         broadcast_factor = elementwise_loss.numel() // mask.numel()
         valid_pixels = mask.sum() * broadcast_factor
         if valid_pixels > 0:
