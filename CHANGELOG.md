@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   init. `SourceDataDataModule` takes per-split `train_selector` and `eval_selector` arguments; the default
   experiment uses importance sampling on train and uniform 10% sampling on val/test.
   [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- CI check that fails pull requests which don't update `CHANGELOG.md`; PRs that don't need an entry can opt out
+  with the `no changelog` label. [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
 
 ### Changed
 
@@ -43,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Time-split subsets of an indexed dataset now rebase the absolute `t` indexes onto the sliced store and drop
   windows that would cross the split boundary, so they no longer read the wrong time steps or leak samples
   across splits. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- Missing changelog entries for [#17](https://github.com/mlcast-community/mlcast/pull/17).
+  [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
 
 ## v0.1.0 - 2026-06-01
 
