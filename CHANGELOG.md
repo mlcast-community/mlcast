@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Dataset sampling folded into `mlcast` from the standalone `mlcast-dataset-sampler` as
+  `mlcast.data.source_data.sampling`. `mlcast build-sampling-index` scans a source Zarr (on CPU, or GPU with
+  `--device cuda`) and writes a parquet sampling index of candidate datacubes with per-datacube stats
+  (`nan_count`, `sum`, `mean`, `frac_wet`) and the sampling parameters in its metadata;
+  `mlcast validate-sampling-index` checks a file against that contract.
+  [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- Pluggable candidate selectors (`CandidateSelector`, `ImportanceSelector`, `UniformSelector`, with a
+  `register_selector`/`get_selector` registry) that pick the subset of the index to train on, once at dataset
+  init. `SourceDataDataModule` takes per-split `train_selector` and `eval_selector` arguments; the default
+  experiment uses importance sampling on train and uniform 10% sampling on val/test.
+  [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- CI check that fails pull requests which don't update `CHANGELOG.md`; PRs that don't need an entry can opt out
+  with the `no changelog` label. [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
+
+### Changed
+
+- **Breaking:** `SourceDataPrecomputedSamplingDataset` is renamed `SourceDataIndexedDataset` and its
+  `csv_path` argument is renamed `index_path`. It now reads a parquet sampling index; legacy `.csv` indexes are
+  still accepted and used as-is.
+  [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- **Breaking:** the default experiment now loads `rainfall_flux` (was `rainfall_rate`) from
+  `./data/sampled_datacubes.parquet`.
+  [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- **Breaking:** `target_mask` is now collapsed over the whole sequence to shape `(1, C, H, W)`. A cell is valid
+  only if it is finite at every input and target step, and the masked loss broadcasts the mask over the forecast
+  steps. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- `bottleneck`, `pyarrow` and `pydantic` are now core dependencies; the unused `fire` dependency is removed.
+  [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- The CLI and `mlcast.data` import lazily, so `mlcast -h` and the data-prep commands start in well under a
+  second. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+
+### Fixed
+
+- Time-split subsets of an indexed dataset now rebase the absolute `t` indexes onto the sliced store and drop
+  windows that would cross the split boundary, so they no longer read the wrong time steps or leak samples
+  across splits. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- Missing changelog entries for [#17](https://github.com/mlcast-community/mlcast/pull/17).
+  [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
+
 ## v0.1.0 - 2026-06-01
 
 This release establishes `mlcast` as a usable foundation for machine-learning weather nowcasting experiments.
