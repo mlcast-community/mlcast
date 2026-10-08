@@ -311,7 +311,7 @@ Common flags (`mlcast build-sampling-index -h` lists them all):
 | `--device` | auto | Compute backend: `auto` / `cpu` (bottleneck) / `cuda` |
 | `--workers` | 8 | CPU worker processes, or GPU chunk-reader threads |
 | `--data-var` / `--time-var` | RR / time | Names of the Zarr data and time variables |
-| `-o` / `--output` | next to dataset | Output path; if omitted, written next to the Zarr store and auto-named from the parameters. Use `./name.parquet` or an absolute path to write elsewhere |
+| `-o` / `--output` | auto | Output path; if omitted, auto-named from the parameters and written next to the Zarr store. Use `./name.parquet` or an absolute path to write elsewhere |
 
 ### `mlcast validate-sampling-index` — check an index against the contract
 

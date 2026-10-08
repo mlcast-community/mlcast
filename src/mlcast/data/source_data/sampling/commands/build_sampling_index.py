@@ -61,10 +61,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--output",
         type=str,
         default=None,
-        help="Output Parquet file path. If omitted, the file is written next to the Zarr dataset "
-        "(in its parent directory) with a name generated from the sampling parameters. To write "
-        "elsewhere, pass a path relative to the current directory (e.g. ./index.parquet) or an "
-        "absolute path. Missing parent directories are created.",
+        help="Output Parquet file path. If omitted, auto-generated from the sampling parameters "
+        "(sampling_index_<start>-<end>_<T>x<W>x<H>_<stepT>x<stepX>x<stepY>_<max_nan>.parquet) and "
+        "written next to the Zarr dataset, in its parent directory. To write elsewhere, pass a path "
+        "relative to the current directory (e.g. ./index.parquet) or an absolute path. Missing "
+        "parent directories are created.",
     )
     parser.add_argument("--start-date", type=str, default=None, help="Start date (YYYY-MM-DD).")
     parser.add_argument("--end-date", type=str, default=None, help="End date (YYYY-MM-DD).")
