@@ -47,9 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   across splits. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
 - Missing changelog entries for [#17](https://github.com/mlcast-community/mlcast/pull/17).
   [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
-- Register the `equivalent_reflectivity_factor` CF standard name (radar reflectivity in dBZ, as used by DMI
-  datasets) in the normalization and denormalization registries, so training on such datasets no longer fails
-  with a `KeyError` on the first batch.
+- Register `equivalent_reflectivity_factor` (radar reflectivity in dBZ) in the normalization registries, so
+  training on it no longer fails with a `KeyError`.
   [#24](https://github.com/mlcast-community/mlcast/pull/24) @leifdenby
 
 ## v0.1.0 - 2026-06-01
