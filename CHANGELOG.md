@@ -20,8 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   init. `SourceDataDataModule` takes per-split `train_selector` and `eval_selector` arguments; the default
   experiment uses importance sampling on train and uniform 10% sampling on val/test.
   [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
-- CI check that fails pull requests which don't update `CHANGELOG.md`; PRs that don't need an entry can opt out
-  with the `no changelog` label. [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
 
 ### Changed
 
@@ -35,8 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `target_mask` is now collapsed over the whole sequence to shape `(1, C, H, W)`. A cell is valid
   only if it is finite at every input and target step, and the masked loss broadcasts the mask over the forecast
   steps. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
-- `bottleneck`, `pyarrow` and `pydantic` are now core dependencies; the unused `fire` dependency is removed.
-  [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
 - The CLI and `mlcast.data` import lazily, so `mlcast -h` and the data-prep commands start in well under a
   second. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
 
@@ -45,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Time-split subsets of an indexed dataset now rebase the absolute `t` indexes onto the sliced store and drop
   windows that would cross the split boundary, so they no longer read the wrong time steps or leak samples
   across splits. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+
+### Maintenance
+
+- `bottleneck`, `pyarrow` and `pydantic` are now core dependencies; the unused `fire` dependency is removed.
+  [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- CI check that fails pull requests which don't update `CHANGELOG.md`; PRs that don't need an entry can opt out
+  with the `no changelog` label. [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
+- CI workflow that runs the pytest suite on every push and pull request. @leifdenby
 - Missing changelog entries for [#17](https://github.com/mlcast-community/mlcast/pull/17).
   [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
 
