@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   steps. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
 - `bottleneck`, `pyarrow` and `pydantic` are now core dependencies; the unused `fire` dependency is removed.
   [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- `mlcast build-sampling-index` now writes its output next to the Zarr dataset when `-o` is omitted (was the
+  current working directory); pass `-o ./name.parquet` or an absolute path to write elsewhere.
+  [#31](https://github.com/mlcast-community/mlcast/pull/31) @leifdenby
 - The CLI and `mlcast.data` import lazily, so `mlcast -h` and the data-prep commands start in well under a
   second. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
 
@@ -45,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Time-split subsets of an indexed dataset now rebase the absolute `t` indexes onto the sliced store and drop
   windows that would cross the split boundary, so they no longer read the wrong time steps or leak samples
   across splits. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- `mlcast build-sampling-index` now opens its output before scanning and creates missing parent directories,
+  so an unwritable output (e.g. disk quota exceeded) fails immediately instead of after the scan starts. A write
+  failure mid-scan now aborts the run rather than leaving it hanging, and the output path is logged as an
+  absolute path. [#31](https://github.com/mlcast-community/mlcast/pull/31) @leifdenby
 - Missing changelog entries for [#17](https://github.com/mlcast-community/mlcast/pull/17).
   [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
 

@@ -53,6 +53,13 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
+# Filename used when -o/--output is omitted; the fields are the matching CLI
+# parameters, with dates formatted as YYYY-MM-DD.
+DEFAULT_OUTPUT_FILENAME_TEMPLATE = (
+    "sampling_index_{start_date}-{end_date}_{time_depth}x{width}x{height}_{step_t}x{step_x}x{step_y}_{max_nan}.parquet"
+)
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add stats specific arguments to the parser."""
     parser.add_argument("zarr_path", type=str, help="Path to the Zarr dataset.")
@@ -61,7 +68,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--output",
         type=str,
         default=None,
-        help="Output Parquet file path. If not specified, auto-generated from parameters.",
+        help="Output Parquet file path. If omitted, auto-generated from the sampling parameters "
+        f"({DEFAULT_OUTPUT_FILENAME_TEMPLATE}) and "
+        "written next to the Zarr dataset, in its parent directory. To write elsewhere, pass a path "
+        "relative to the current directory (e.g. ./index.parquet) or an absolute path. Missing "
+        "parent directories are created.",
     )
     parser.add_argument("--start-date", type=str, default=None, help="Start date (YYYY-MM-DD).")
     parser.add_argument("--end-date", type=str, default=None, help="End date (YYYY-MM-DD).")
@@ -292,24 +303,23 @@ def _process_chunk(
     }
 
 
-def _parquet_writer(
-    output_queue: Queue,
-    filename: str,
-    schema: pa.Schema,
-) -> None:
-    """Drain the queue and stream rows to a Parquet file.
+def _open_parquet_writer(filename: str, schema: pa.Schema) -> pq.ParquetWriter:
+    """Create the output's parent directories and open the Parquet writer.
 
-    Each queue item is the dict returned by `_process_chunk`. We buffer
-    into Arrow RecordBatches and append to a single ParquetWriter so the
-    on-disk file stays a single self-contained parquet. `schema` is the
-    canonical SAMPLING_INDEX_SCHEMA with the mlcast sampling parameters attached as
-    metadata (see `sampling_index_spec.build_schema`), so downstream commands don't
-    need to parse the filename.
+    Called on the main thread before the scan starts, so an unwritable output
+    (missing permissions, disk quota, ...) fails immediately rather than
+    after reading the first chunks. `schema` is the canonical
+    SAMPLING_INDEX_SCHEMA with the mlcast sampling parameters attached as
+    metadata (see `sampling_index_spec.build_schema`), so downstream commands
+    don't need to parse the filename.
     """
+    parent = os.path.dirname(filename)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     # Column encodings tuned to the data: `t` is written in ascending order so
     # it delta-encodes to almost nothing; x/y/nan_count are low-cardinality
     # (dictionary); the floats compress better split into byte planes.
-    writer = pq.ParquetWriter(
+    return pq.ParquetWriter(
         filename,
         schema,
         compression="zstd",
@@ -322,12 +332,27 @@ def _parquet_writer(
             "frac_wet": "BYTE_STREAM_SPLIT",
         },
     )
+
+
+def _parquet_writer(
+    output_queue: Queue,
+    writer: pq.ParquetWriter,
+    schema: pa.Schema,
+    errors: list[BaseException],
+) -> None:
+    """Drain the queue and stream rows to a Parquet file.
+
+    Each queue item is the dict returned by `_process_chunk`. We buffer
+    into Arrow RecordBatches and append to a single ParquetWriter so the
+    on-disk file stays a single self-contained parquet.
+
+    A write failure is appended to `errors` for the producer to re-raise.
+    The queue is then still drained until the ``None`` sentinel so the
+    producer never blocks on a full queue.
+    """
     total_rows = 0
     try:
-        while True:
-            item = output_queue.get()
-            if item is None:
-                break
+        while (item := output_queue.get()) is not None:
             if item["t"].size == 0:
                 continue
             batch = pa.record_batch(
@@ -336,9 +361,13 @@ def _parquet_writer(
             )
             writer.write_batch(batch)
             total_rows += batch.num_rows
-    finally:
         writer.close()
-    logger.info(f"Wrote {total_rows} rows to {filename}")
+    except Exception as e:
+        errors.append(e)
+        while output_queue.get() is not None:
+            pass
+        return
+    logger.info(f"Wrote {total_rows} rows to {writer.where}")
 
 
 def _resolve_device(requested: str) -> tuple[str, str]:
@@ -523,9 +552,26 @@ def run(args: argparse.Namespace) -> int:
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
     if args.output:
-        output_file = args.output
+        output_file = os.path.abspath(args.output)
+    elif "://" in args.zarr_path:
+        logger.error(f"Cannot place the output next to a remote dataset ({args.zarr_path}); pass -o/--output.")
+        return 1
     else:
-        output_file = f"sampling_index_{start_str}-{end_str}_{Dt}x{w}x{h}_{step_T}x{step_X}x{step_Y}_{max_nan}.parquet"
+        output_name = DEFAULT_OUTPUT_FILENAME_TEMPLATE.format(
+            start_date=start_str,
+            end_date=end_str,
+            time_depth=Dt,
+            width=w,
+            height=h,
+            step_t=step_T,
+            step_x=step_X,
+            step_y=step_Y,
+            max_nan=max_nan,
+        )
+        # rstrip so a trailing slash on the store path doesn't make dirname
+        # return the store directory itself.
+        dataset_dir = os.path.dirname(os.path.abspath(args.zarr_path.rstrip("/")))
+        output_file = os.path.join(dataset_dir, output_name)
     if os.path.exists(output_file) and not args.overwrite:
         logger.error(f"File {output_file} already exists. Use --overwrite to replace.")
         return 1
@@ -550,6 +596,12 @@ def run(args: argparse.Namespace) -> int:
         units=var_attrs.get("units"),
     )
     schema = build_schema(metadata)
+
+    try:
+        writer = _open_parquet_writer(output_file, schema)
+    except OSError as e:
+        logger.error(f"Cannot write output file {output_file}: {e}")
+        return 1
 
     cfg = Table.grid(padding=(0, 2))
     cfg.add_column(justify="right", style="bold cyan")
@@ -578,9 +630,17 @@ def run(args: argparse.Namespace) -> int:
     )
 
     output_queue: Queue = Queue(maxsize=100)
-    writer_thread = Thread(target=_parquet_writer, args=(output_queue, output_file, schema))
+    writer_errors: list[BaseException] = []
+    writer_thread = Thread(target=_parquet_writer, args=(output_queue, writer, schema, writer_errors))
     writer_thread.daemon = False
     writer_thread.start()
+
+    def _emit(hits: dict) -> None:
+        # Fail fast if the writer thread has died, instead of scanning the
+        # whole dataset into a queue nobody writes out.
+        if writer_errors:
+            raise writer_errors[0]
+        output_queue.put(hits)
 
     progress = Progress(
         SpinnerColumn(),
@@ -592,56 +652,62 @@ def run(args: argparse.Namespace) -> int:
         TimeRemainingColumn(),
         console=console,
     )
-    if device == "cuda":
-        import torch
+    try:
+        if device == "cuda":
+            import torch
 
-        from . import _sample_stats_gpu
+            from . import _sample_stats_gpu
 
-        dev = torch.device("cuda")
+            dev = torch.device("cuda")
 
-        def _read_chunk(tp):
-            s0, e0 = int(tp[0]), int(tp[1])
-            arr = np.asarray(data[s0 + t_start_idx : e0 + t_start_idx, :, :], dtype=np.float32)
-            return (s0, e0), arr
+            def _read_chunk(tp):
+                s0, e0 = int(tp[0]), int(tp[1])
+                arr = np.asarray(data[s0 + t_start_idx : e0 + t_start_idx, :, :], dtype=np.float32)
+                return (s0, e0), arr
 
-        with progress:
-            task = progress.add_task("🔍 Scanning time chunks (GPU)", total=len(t_starts))
-            for time_range, chunk_np in _prefetched(
-                _read_chunk, t_pairs, lookahead=n_workers + 2, n_workers=max(1, n_workers)
-            ):
-                hits = _sample_stats_gpu.process_chunk(
-                    time_range,
-                    t_start_idx,
-                    chunk_np,
-                    max_nan,
-                    wet_threshold,
-                    deltas,
-                    steps,
-                    valid_start_mask,
-                    dev,
-                )
-                output_queue.put(hits)
-                progress.advance(task)
-    else:
-        process_chunk_partial = partial(
-            _process_chunk,
-            t_start_idx=t_start_idx,
-            data=data,
-            max_nan=max_nan,
-            wet_threshold=wet_threshold,
-            deltas=deltas,
-            steps=steps,
-            valid_start_mask=valid_start_mask,
-        )
-        with progress:
-            task = progress.add_task("🔍 Scanning time chunks", total=len(t_starts))
-            with Pool(n_workers) as pool:
-                for hits in pool.imap(process_chunk_partial, t_pairs, chunksize=1):
-                    output_queue.put(hits)
+            with progress:
+                task = progress.add_task("🔍 Scanning time chunks (GPU)", total=len(t_starts))
+                for time_range, chunk_np in _prefetched(
+                    _read_chunk, t_pairs, lookahead=n_workers + 2, n_workers=max(1, n_workers)
+                ):
+                    hits = _sample_stats_gpu.process_chunk(
+                        time_range,
+                        t_start_idx,
+                        chunk_np,
+                        max_nan,
+                        wet_threshold,
+                        deltas,
+                        steps,
+                        valid_start_mask,
+                        dev,
+                    )
+                    _emit(hits)
                     progress.advance(task)
+        else:
+            process_chunk_partial = partial(
+                _process_chunk,
+                t_start_idx=t_start_idx,
+                data=data,
+                max_nan=max_nan,
+                wet_threshold=wet_threshold,
+                deltas=deltas,
+                steps=steps,
+                valid_start_mask=valid_start_mask,
+            )
+            with progress:
+                task = progress.add_task("🔍 Scanning time chunks", total=len(t_starts))
+                with Pool(n_workers) as pool:
+                    for hits in pool.imap(process_chunk_partial, t_pairs, chunksize=1):
+                        _emit(hits)
+                        progress.advance(task)
+    finally:
+        # Always deliver the sentinel, so the (non-daemon) writer thread exits
+        # and the process can terminate even when the scan raised.
+        output_queue.put(None)
+        writer_thread.join()
 
-    output_queue.put(None)
-    writer_thread.join()
+    if writer_errors:
+        raise writer_errors[0]
 
     n_rows = pq.read_metadata(output_file).num_rows
     if n_rows == 0:

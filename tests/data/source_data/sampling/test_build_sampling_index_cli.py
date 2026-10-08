@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -18,9 +19,14 @@ import pyarrow.parquet as pq
 import pytest
 import xarray as xr
 
-from mlcast.data.source_data.sampling.commands.build_sampling_index import add_arguments, run
+from mlcast.data.source_data.sampling.commands.build_sampling_index import (
+    DEFAULT_OUTPUT_FILENAME_TEMPLATE,
+    add_arguments,
+    run,
+)
 
 T_TOTAL = 30
+_MODULE = "mlcast.data.source_data.sampling.commands.build_sampling_index"
 
 
 def _write_zarr(path: Path, times: pd.DatetimeIndex, all_nan: bool = False) -> Path:
@@ -43,14 +49,14 @@ def zarr_10min(tmp_path: Path) -> Path:
     return _write_zarr(tmp_path / "ten_min.zarr", pd.date_range("2024-01-01", periods=T_TOTAL, freq="10min"))
 
 
-def _run_stats(zarr_path: Path, output: Path, *extra_cli: str) -> int:
+def _run_stats(zarr_path: Path, output: Path | None, *extra_cli: str) -> int:
     parser = argparse.ArgumentParser()
     add_arguments(parser)
+    output_cli = [] if output is None else ["-o", str(output)]
     args = parser.parse_args(
         [
             str(zarr_path),
-            "-o",
-            str(output),
+            *output_cli,
             "--device",
             "cpu",
             "--workers",
@@ -105,6 +111,50 @@ def test_gappy_axis_with_matching_cadence_fails(tmp_path: Path) -> None:
     out = tmp_path / "stats.parquet"
     assert _run_stats(store, out, "--time-step-minutes", "10") == 1
     assert not out.exists()
+
+
+def test_default_output_is_next_to_dataset(zarr_10min: Path, tmp_path: Path) -> None:
+    """Without -o the index lands in the dataset's parent directory, regardless
+    of the current working directory."""
+    assert _run_stats(zarr_10min, None, "--time-step-minutes", "10") == 0
+    out = zarr_10min.parent / DEFAULT_OUTPUT_FILENAME_TEMPLATE.format(
+        start_date="2024-01-01",
+        end_date="2024-01-01",
+        time_depth=4,
+        width=16,
+        height=16,
+        step_t=1,
+        step_x=8,
+        step_y=8,
+        max_nan=100,
+    )
+    assert pq.read_metadata(out).num_rows > 0
+
+
+def test_missing_output_parent_dirs_are_created(zarr_10min: Path, tmp_path: Path) -> None:
+    out = tmp_path / "does" / "not" / "exist" / "stats.parquet"
+    assert _run_stats(zarr_10min, out, "--time-step-minutes", "10") == 0
+    assert pq.read_metadata(out).num_rows > 0
+
+
+def test_unwritable_output_fails_before_scan(zarr_10min: Path, tmp_path: Path) -> None:
+    """An output path that cannot be opened (here: its parent is a regular
+    file) must fail up front with a non-zero exit, before any chunk is read."""
+    blocker = tmp_path / "not_a_dir"
+    blocker.write_text("")
+    with patch(f"{_MODULE}._process_chunk") as process_chunk:
+        assert _run_stats(zarr_10min, blocker / "stats.parquet", "--time-step-minutes", "10") == 1
+    process_chunk.assert_not_called()
+
+
+def test_write_failure_mid_scan_raises(zarr_10min: Path, tmp_path: Path) -> None:
+    """If the writer thread fails partway (e.g. disk quota hit), the error must
+    propagate out of `run()` rather than being swallowed in the thread."""
+    writer = MagicMock()
+    writer.write_batch.side_effect = OSError(122, "Disk quota exceeded")
+    with patch(f"{_MODULE}._open_parquet_writer", return_value=writer):
+        with pytest.raises(OSError, match="Disk quota exceeded"):
+            _run_stats(zarr_10min, tmp_path / "stats.parquet", "--time-step-minutes", "10")
 
 
 def test_all_windows_filtered_out_fails(tmp_path: Path) -> None:
