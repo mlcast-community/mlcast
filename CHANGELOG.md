@@ -48,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
 - CI check that fails pull requests which don't update `CHANGELOG.md`; PRs that don't need an entry can opt out
   with the `no changelog` label. [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
-- CI workflow that runs the pytest suite on every push and pull request. @leifdenby
+- CI workflow that runs the pytest suite on every push and pull request.
+  [#30](https://github.com/mlcast-community/mlcast/pull/30) @leifdenby
 - Missing changelog entries for [#17](https://github.com/mlcast-community/mlcast/pull/17).
   [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
 
