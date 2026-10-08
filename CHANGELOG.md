@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   steps. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
 - `bottleneck`, `pyarrow` and `pydantic` are now core dependencies; the unused `fire` dependency is removed.
   [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- `mlcast build-sampling-index` now writes its output next to the Zarr dataset when `-o` is omitted (was the
+  current working directory); pass `-o ./name.parquet` or an absolute path to write elsewhere.
+  [#31](https://github.com/mlcast-community/mlcast/pull/31) @leifdenby
 - The CLI and `mlcast.data` import lazily, so `mlcast -h` and the data-prep commands start in well under a
   second. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
 

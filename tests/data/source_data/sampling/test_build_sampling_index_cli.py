@@ -45,14 +45,14 @@ def zarr_10min(tmp_path: Path) -> Path:
     return _write_zarr(tmp_path / "ten_min.zarr", pd.date_range("2024-01-01", periods=T_TOTAL, freq="10min"))
 
 
-def _run_stats(zarr_path: Path, output: Path, *extra_cli: str) -> int:
+def _run_stats(zarr_path: Path, output: Path | None, *extra_cli: str) -> int:
     parser = argparse.ArgumentParser()
     add_arguments(parser)
+    output_cli = [] if output is None else ["-o", str(output)]
     args = parser.parse_args(
         [
             str(zarr_path),
-            "-o",
-            str(output),
+            *output_cli,
             "--device",
             "cpu",
             "--workers",
@@ -107,6 +107,14 @@ def test_gappy_axis_with_matching_cadence_fails(tmp_path: Path) -> None:
     out = tmp_path / "stats.parquet"
     assert _run_stats(store, out, "--time-step-minutes", "10") == 1
     assert not out.exists()
+
+
+def test_default_output_is_next_to_dataset(zarr_10min: Path, tmp_path: Path) -> None:
+    """Without -o the index lands in the dataset's parent directory, regardless
+    of the current working directory."""
+    assert _run_stats(zarr_10min, None, "--time-step-minutes", "10") == 0
+    (out,) = zarr_10min.parent.glob("sampling_index_*.parquet")
+    assert pq.read_metadata(out).num_rows > 0
 
 
 def test_missing_output_parent_dirs_are_created(zarr_10min: Path, tmp_path: Path) -> None:

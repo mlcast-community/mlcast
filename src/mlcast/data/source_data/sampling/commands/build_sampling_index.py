@@ -61,7 +61,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--output",
         type=str,
         default=None,
-        help="Output Parquet file path. If not specified, auto-generated from parameters.",
+        help="Output Parquet file path. If omitted, the file is written next to the Zarr dataset "
+        "(in its parent directory) with a name generated from the sampling parameters. To write "
+        "elsewhere, pass a path relative to the current directory (e.g. ./index.parquet) or an "
+        "absolute path. Missing parent directories are created.",
     )
     parser.add_argument("--start-date", type=str, default=None, help="Start date (YYYY-MM-DD).")
     parser.add_argument("--end-date", type=str, default=None, help="End date (YYYY-MM-DD).")
@@ -541,10 +544,16 @@ def run(args: argparse.Namespace) -> int:
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
     if args.output:
-        output_file = args.output
+        output_file = os.path.abspath(args.output)
+    elif "://" in args.zarr_path:
+        logger.error(f"Cannot place the output next to a remote dataset ({args.zarr_path}); pass -o/--output.")
+        return 1
     else:
-        output_file = f"sampling_index_{start_str}-{end_str}_{Dt}x{w}x{h}_{step_T}x{step_X}x{step_Y}_{max_nan}.parquet"
-    output_file = os.path.abspath(output_file)
+        output_name = f"sampling_index_{start_str}-{end_str}_{Dt}x{w}x{h}_{step_T}x{step_X}x{step_Y}_{max_nan}.parquet"
+        # rstrip so a trailing slash on the store path doesn't make dirname
+        # return the store directory itself.
+        dataset_dir = os.path.dirname(os.path.abspath(args.zarr_path.rstrip("/")))
+        output_file = os.path.join(dataset_dir, output_name)
     if os.path.exists(output_file) and not args.overwrite:
         logger.error(f"File {output_file} already exists. Use --overwrite to replace.")
         return 1
