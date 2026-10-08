@@ -30,6 +30,7 @@ jobs:
           path: .pytest_cache/italian_dataset_v0.1.0_100t.zarr
           key: test-dataset-italian_dataset_v0.1.0_100t
 
-      # pytest lives in the `dev` extra, so it must be synced for `uv run`.
+      # pytest lives in the `dev` extra, so it must be synced for `uv run`. The `cpu`
+      # extra installs PyTorch without the CUDA libraries.
       # GPU-only tests skip themselves when no CUDA device is available.
-      - run: uv run --extra dev pytest -rs tests
+      - run: uv run --extra cpu --extra dev pytest -rs tests

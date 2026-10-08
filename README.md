@@ -25,9 +25,9 @@ cd mlcast
 # Install uv if not already installed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# And install depencies, depending on whether you have a GPU available.
-# CPU
-uv sync
+# And install dependencies, picking the PyTorch build for your hardware.
+# CPU only
+uv sync --extra cpu
 
 # GPU — CUDA 12.8
 uv sync --extra gpu-cu128
@@ -36,12 +36,16 @@ uv sync --extra gpu-cu128
 uv sync --extra gpu-cu130
 ```
 
+PyTorch is only installed through one of these extras, so pick one: plain `uv sync` leaves it out. After this
+one-time sync, `uv run mlcast ...` keeps the PyTorch build you chose.
+
 Next you can jump to [using mlcast](#usage) or, if you intend to modify the code, setup the development toolchain as described below:
 
 ```bash
 
-# Install dev dependencies
-uv sync --extra dev
+# Install dev dependencies, together with the PyTorch extra you picked above
+# (`uv sync` removes extras that aren't listed, including PyTorch)
+uv sync --extra cpu --extra dev
 
 # Install the pre-commit git hook (runs checks automatically on every commit)
 uv run pre-commit install
@@ -49,11 +53,15 @@ uv run pre-commit install
 
 ### PyPI release
 
-Tagged releases are published to PyPI and can be installed with pip:
+Tagged releases are published to PyPI and can be installed with pip. PyTorch comes through an extra, so include
+one:
 
 ```bash
-pip install mlcast
+pip install "mlcast[cpu]"
 ```
+
+With pip, all of the extras (`cpu`, `gpu-cu128`, `gpu-cu130`) install the default PyTorch wheels from PyPI. Install
+PyTorch first from the [PyTorch index](https://pytorch.org/get-started/locally/) if you need a specific build.
 
 For active development or access to unreleased changes, clone the repository and install locally with `uv` as described above.
 
