@@ -25,4 +25,5 @@ jobs:
       # Run pre-commit through uv so CI uses the same project-managed environment
       # as local development, including local hooks that invoke `uv run ...`.
       # pre-commit lives in the `dev` extra, so it must be synced for `uv run`.
-      - run: uv run --extra dev pre-commit run --all-files
+      # The `cpu` extra installs PyTorch without the CUDA libraries.
+      - run: uv run --extra cpu --extra dev pre-commit run --all-files

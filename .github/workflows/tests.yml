@@ -1,0 +1,36 @@
+### CI actions are pinned to immutable commit hashes, not mutable tags, to reduce supply-chain risk and help prevent LLM-based CI attacks. See https://github.com/lirantal/pypi-security-best-practices#13-secure-your-cicd-release-pipeline.
+name: tests
+
+on:
+  # Run on every pushed branch.
+  push:
+  # Run on every pull request update.
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    name: "pytest"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+
+      # The `fp_test_dataset` fixture downloads a 100-timestep subset of the
+      # IT-DPC dataset from S3 into `.pytest_cache/` on first use. Cache it so
+      # each run doesn't re-download it. Bump the key suffix if the fixture's
+      # source or subset changes.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .pytest_cache/italian_dataset_v0.1.0_100t.zarr
+          key: test-dataset-italian_dataset_v0.1.0_100t
+
+      # pytest lives in the `dev` extra, so it must be synced for `uv run`. The `cpu`
+      # extra installs PyTorch without the CUDA libraries.
+      # GPU-only tests skip themselves when no CUDA device is available.
+      - run: uv run --extra cpu --extra dev pytest -rs tests

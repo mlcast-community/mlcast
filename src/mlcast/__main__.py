@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib.util
 import sys
 from typing import TYPE_CHECKING
 
@@ -44,6 +45,14 @@ _config = None
 def _define_train_flags() -> None:
     """Import the Fiddle/absl machinery and define the `train` flags (once)."""
     global FLAGS, _config
+    # torch is only installed through the `cpu` / `gpu-*` extras, so fail with
+    # install instructions rather than a bare ModuleNotFoundError.
+    if importlib.util.find_spec("torch") is None:
+        sys.exit(
+            "mlcast train requires PyTorch, which is installed through an extra:\n"
+            "  uv sync --extra cpu  (or --extra gpu-cu126 / gpu-cu128 / gpu-cu130)\n"
+            "  pip install 'mlcast[cpu]'"
+        )
     from absl import flags
     from fiddle import absl_flags
 
