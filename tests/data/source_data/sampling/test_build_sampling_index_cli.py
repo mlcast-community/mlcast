@@ -19,7 +19,11 @@ import pyarrow.parquet as pq
 import pytest
 import xarray as xr
 
-from mlcast.data.source_data.sampling.commands.build_sampling_index import add_arguments, run
+from mlcast.data.source_data.sampling.commands.build_sampling_index import (
+    DEFAULT_OUTPUT_FILENAME_TEMPLATE,
+    add_arguments,
+    run,
+)
 
 T_TOTAL = 30
 _MODULE = "mlcast.data.source_data.sampling.commands.build_sampling_index"
@@ -113,7 +117,17 @@ def test_default_output_is_next_to_dataset(zarr_10min: Path, tmp_path: Path) -> 
     """Without -o the index lands in the dataset's parent directory, regardless
     of the current working directory."""
     assert _run_stats(zarr_10min, None, "--time-step-minutes", "10") == 0
-    (out,) = zarr_10min.parent.glob("sampling_index_*.parquet")
+    out = zarr_10min.parent / DEFAULT_OUTPUT_FILENAME_TEMPLATE.format(
+        start_date="2024-01-01",
+        end_date="2024-01-01",
+        time_depth=4,
+        width=16,
+        height=16,
+        step_t=1,
+        step_x=8,
+        step_y=8,
+        max_nan=100,
+    )
     assert pq.read_metadata(out).num_rows > 0
 
 

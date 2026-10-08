@@ -53,6 +53,13 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
+# Filename used when -o/--output is omitted; the fields are the matching CLI
+# parameters, with dates formatted as YYYY-MM-DD.
+DEFAULT_OUTPUT_FILENAME_TEMPLATE = (
+    "sampling_index_{start_date}-{end_date}_{time_depth}x{width}x{height}_{step_t}x{step_x}x{step_y}_{max_nan}.parquet"
+)
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add stats specific arguments to the parser."""
     parser.add_argument("zarr_path", type=str, help="Path to the Zarr dataset.")
@@ -62,7 +69,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         default=None,
         help="Output Parquet file path. If omitted, auto-generated from the sampling parameters "
-        "(sampling_index_<start>-<end>_<T>x<W>x<H>_<stepT>x<stepX>x<stepY>_<max_nan>.parquet) and "
+        f"({DEFAULT_OUTPUT_FILENAME_TEMPLATE}) and "
         "written next to the Zarr dataset, in its parent directory. To write elsewhere, pass a path "
         "relative to the current directory (e.g. ./index.parquet) or an absolute path. Missing "
         "parent directories are created.",
@@ -550,7 +557,17 @@ def run(args: argparse.Namespace) -> int:
         logger.error(f"Cannot place the output next to a remote dataset ({args.zarr_path}); pass -o/--output.")
         return 1
     else:
-        output_name = f"sampling_index_{start_str}-{end_str}_{Dt}x{w}x{h}_{step_T}x{step_X}x{step_Y}_{max_nan}.parquet"
+        output_name = DEFAULT_OUTPUT_FILENAME_TEMPLATE.format(
+            start_date=start_str,
+            end_date=end_str,
+            time_depth=Dt,
+            width=w,
+            height=h,
+            step_t=step_T,
+            step_x=step_X,
+            step_y=step_Y,
+            max_nan=max_nan,
+        )
         # rstrip so a trailing slash on the store path doesn't make dirname
         # return the store directory itself.
         dataset_dir = os.path.dirname(os.path.abspath(args.zarr_path.rstrip("/")))
