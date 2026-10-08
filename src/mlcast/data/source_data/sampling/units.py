@@ -25,7 +25,6 @@ RAIN_RATE_STANDARD_NAMES = {
 }
 REFLECTIVITY_STANDARD_NAMES = {
     "equivalent_reflectivity_factor",
-    "radar_reflectivity",
 }
 
 RAIN_RATE_UNITS = {

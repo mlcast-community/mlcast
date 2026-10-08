@@ -44,6 +44,8 @@ def test_normalization_registry():
     assert "rainfall_rate" in NORMALIZATION_REGISTRY
     assert NORMALIZATION_REGISTRY["rainfall_rate"] == rainfall_rate_to_normalized
     assert "rainfall_flux" in NORMALIZATION_REGISTRY
+    assert "equivalent_reflectivity_factor" in NORMALIZATION_REGISTRY
+    assert NORMALIZATION_REGISTRY["equivalent_reflectivity_factor"] == DEFAULT_SCALING.normalize_reflectivity
 
 
 def test_denormalization_registry():
@@ -51,6 +53,20 @@ def test_denormalization_registry():
     assert "rainfall_rate" in DENORMALIZATION_REGISTRY
     assert DENORMALIZATION_REGISTRY["rainfall_rate"] == normalized_to_rainfall_rate
     assert "rainfall_flux" in DENORMALIZATION_REGISTRY
+    assert "equivalent_reflectivity_factor" in DENORMALIZATION_REGISTRY
+    assert DENORMALIZATION_REGISTRY["equivalent_reflectivity_factor"] == DEFAULT_SCALING.denormalize_reflectivity
+
+
+def test_equivalent_reflectivity_factor_is_raw_dbz_normalization():
+    """DMI's native variable is already in dBZ -- normalizing it must be a plain
+    linear rescale into [-1, 1], not a Z-R rainfall-rate round trip."""
+    dbz = np.array([0.0, 30.0, 60.0])
+    norm_func = NORMALIZATION_REGISTRY["equivalent_reflectivity_factor"]
+    denorm_func = DENORMALIZATION_REGISTRY["equivalent_reflectivity_factor"]
+
+    normalized = norm_func(dbz)
+    np.testing.assert_allclose(normalized, [-1.0, 0.0, 1.0])
+    np.testing.assert_allclose(denorm_func(normalized), dbz)
 
 
 def test_nan_passthrough():
