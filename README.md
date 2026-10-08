@@ -29,6 +29,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # CPU only
 uv sync --extra cpu
 
+# GPU — CUDA 12.6
+uv sync --extra gpu-cu126
+
 # GPU — CUDA 12.8
 uv sync --extra gpu-cu128
 
@@ -60,8 +63,9 @@ one:
 pip install "mlcast[cpu]"
 ```
 
-With pip, all of the extras (`cpu`, `gpu-cu128`, `gpu-cu130`) install the default PyTorch wheels from PyPI. Install
-PyTorch first from the [PyTorch index](https://pytorch.org/get-started/locally/) if you need a specific build.
+With pip, all of the extras (`cpu`, `gpu-cu126`, `gpu-cu128`, `gpu-cu130`) install the default PyTorch wheels from
+PyPI. Install PyTorch first from the [PyTorch index](https://pytorch.org/get-started/locally/) if you need a
+specific build.
 
 For active development or access to unreleased changes, clone the repository and install locally with `uv` as described above.
 

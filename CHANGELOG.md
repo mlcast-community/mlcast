@@ -36,9 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The CLI and `mlcast.data` import lazily, so `mlcast -h` and the data-prep commands start in well under a
   second. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
 - **Breaking:** `torch`, `torchvision` and `pytorch-lightning` are no longer core dependencies and are installed
-  through a new `cpu` extra or the existing `gpu-cu128` / `gpu-cu130` extras (`uv sync --extra cpu`,
-  `pip install "mlcast[cpu]"`). After a one-time `uv sync --extra ...`, plain `uv run` no longer swaps the
-  installed PyTorch build. [#30](https://github.com/mlcast-community/mlcast/pull/30) @leifdenby
+  through the new `cpu` and `gpu-cu126` extras or the existing `gpu-cu128` / `gpu-cu130` extras
+  (`uv sync --extra cpu`, `pip install "mlcast[cpu]"`). After a one-time `uv sync --extra ...`, plain `uv run`
+  no longer swaps the installed PyTorch build. [#30](https://github.com/mlcast-community/mlcast/pull/30) @leifdenby
 
 ### Fixed
 

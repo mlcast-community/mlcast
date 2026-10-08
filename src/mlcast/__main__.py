@@ -50,7 +50,7 @@ def _define_train_flags() -> None:
     if importlib.util.find_spec("torch") is None:
         sys.exit(
             "mlcast train requires PyTorch, which is installed through an extra:\n"
-            "  uv sync --extra cpu  (or --extra gpu-cu128 / --extra gpu-cu130)\n"
+            "  uv sync --extra cpu  (or --extra gpu-cu126 / gpu-cu128 / gpu-cu130)\n"
             "  pip install 'mlcast[cpu]'"
         )
     from absl import flags
