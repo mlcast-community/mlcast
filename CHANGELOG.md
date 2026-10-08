@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `mlcast build-sampling-index` now opens its output before scanning and creates missing parent directories,
   so an unwritable output (e.g. disk quota exceeded) fails immediately instead of after the scan starts. A write
   failure mid-scan now aborts the run rather than leaving it hanging, and the output path is logged as an
-  absolute path. @leifdenby
+  absolute path. [#31](https://github.com/mlcast-community/mlcast/pull/31) @leifdenby
 - Missing changelog entries for [#17](https://github.com/mlcast-community/mlcast/pull/17).
   [#26](https://github.com/mlcast-community/mlcast/pull/26) @leifdenby
 
