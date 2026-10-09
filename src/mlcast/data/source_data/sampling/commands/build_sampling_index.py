@@ -346,11 +346,6 @@ def _parquet_writer(
     into Arrow RecordBatches and append to a single ParquetWriter so the
     on-disk file stays a single self-contained parquet.
 
-    A write failure is appended to `errors` for the producer to re-raise.
-    The queue is then still drained until the ``None`` sentinel so the
-    producer never blocks on a full queue.
-    """
-    total_rows = 0
     try:
         while (item := output_queue.get()) is not None:
             if item["t"].size == 0:
@@ -361,13 +356,22 @@ def _parquet_writer(
             )
             writer.write_batch(batch)
             total_rows += batch.num_rows
-        writer.close()
     except Exception as e:
         errors.append(e)
+        # The sentinel has not been consumed in this path: keep draining so the
+        # producer never blocks on a full queue.
         while output_queue.get() is not None:
             pass
-        return
-    logger.info(f"Wrote {total_rows} rows to {writer.where}")
+    finally:
+        # Close in every path. The footer is flushed here, so a disk-quota error
+        # is likely to surface at this point; record it instead of draining,
+        # because the sentinel is already consumed and draining would hang.
+        try:
+            writer.close()
+        except Exception as e:
+            errors.append(e)
+    if not errors:
+        logger.info(f"Wrote {total_rows} rows to {writer.where}")
 
 
 def _resolve_device(requested: str) -> tuple[str, str]:
