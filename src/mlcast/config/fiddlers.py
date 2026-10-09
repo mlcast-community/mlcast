@@ -114,24 +114,31 @@ def use_anon_s3_dataset(cfg: fdl.Buildable, zarr_path: str, endpoint_url: str) -
     }
 
 
-def use_mlflow_logger(cfg: fdl.Config) -> None:
+def use_mlflow_logger(cfg: fdl.Config, tracking_uri: str | None = None) -> None:
     """Fiddler to switch the trainer logger to MLflow.
 
     Replaces the default TensorBoardLogger with an MLFlowLogger, inheriting
-    the experiment name from the existing logger config. The tracking URI and
-    run name are left unset, deferring to the ``MLFLOW_TRACKING_URI`` and
-    ``MLFLOW_RUN_NAME`` environment variables (or MLflow defaults).
+    the experiment name from the existing logger config. The run name is
+    left unset, deferring to the ``MLFLOW_RUN_NAME`` environment variable
+    (or MLflow's default).
 
     Parameters
     ----------
     cfg : fdl.Config
         The Fiddle configuration to mutate.
+    tracking_uri : str, optional
+        Explicit MLflow tracking server URI. When omitted, defers to the
+        ``MLFLOW_TRACKING_URI`` environment variable (or MLflow's local
+        ``./mlruns`` default) — and a missing env var still warns in that
+        case, same as before.
     """
-    if not os.environ.get("MLFLOW_TRACKING_URI"):
+    if tracking_uri is None and not os.environ.get("MLFLOW_TRACKING_URI"):
         logger.warning(
             "MLFLOW_TRACKING_URI is not set. MLflow will log to a local './mlruns' directory. "
             "Set MLFLOW_TRACKING_URI to point to a remote tracking server, "
             "e.g. export MLFLOW_TRACKING_URI=http://localhost:5000"
         )
     cfg.trainer.logger = fdl.Config(MLFlowLogger, experiment_name=cfg.trainer.logger.name)
+    if tracking_uri is not None:
+        cfg.trainer.logger.tracking_uri = tracking_uri
     cfg.trainer.callbacks.append(fdl.Config(LogSystemInfoCallback))

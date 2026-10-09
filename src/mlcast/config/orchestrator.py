@@ -41,6 +41,7 @@ except ImportError:  # wandb is an optional dependency
     wandb = None  # type: ignore[assignment]
     WandbLogger = None  # type: ignore[assignment,misc]
 
+from . import mlflow as mlflow_logging
 from .consistency_checks import validate_config
 
 
@@ -145,7 +146,14 @@ def train_from_config(cfg: fdl.Config) -> None:
             re.sub(r"\[(\d+)\]", r".\1", k): v if isinstance(v, int | float | str | bool) else str(v)
             for k, v in flat_cfg.items()
         }
-        experiment.trainer.logger.log_hyperparams(loggable_cfg)
-        print("Logged flattened Fiddle configuration to trainer.logger")
+        logger = experiment.trainer.logger
+        if MLFlowLogger is not None and isinstance(logger, MLFlowLogger):
+            # MLflow enforces hard key/value length limits and immutable
+            # params; log_hyperparams has no error handling for these, so
+            # route through a resilient path that can't crash the run.
+            mlflow_logging.log_hyperparams(logger, loggable_cfg)
+        else:
+            logger.log_hyperparams(loggable_cfg)
+            print("Logged flattened Fiddle configuration to trainer.logger")
 
     experiment.run()

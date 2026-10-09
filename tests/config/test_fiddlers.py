@@ -1,4 +1,6 @@
-from mlcast.config import set_variables, toggle_masking, training_experiment
+from pytorch_lightning.loggers import MLFlowLogger
+
+from mlcast.config import set_variables, toggle_masking, training_experiment, use_mlflow_logger
 
 
 def test_fiddler_set_variables():
@@ -26,3 +28,25 @@ def test_fiddler_toggle_masking():
     toggle_masking(cfg, True)
     assert cfg.data.dataset_factory.return_mask is True
     assert cfg.pl_module.masked_loss is True
+
+
+def test_fiddler_use_mlflow_logger_explicit_tracking_uri(monkeypatch):
+    """An explicit tracking_uri is applied without needing MLFLOW_TRACKING_URI set."""
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    cfg = training_experiment.as_buildable()
+
+    use_mlflow_logger(cfg, tracking_uri="https://mlflow.example.org/")
+
+    assert cfg.trainer.logger.__fn_or_cls__ is MLFlowLogger
+    assert cfg.trainer.logger.tracking_uri == "https://mlflow.example.org/"
+
+
+def test_fiddler_use_mlflow_logger_defers_to_env_var(monkeypatch):
+    """With no explicit tracking_uri, the logger config carries no tracking_uri of its own."""
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    cfg = training_experiment.as_buildable()
+
+    use_mlflow_logger(cfg)
+
+    assert cfg.trainer.logger.__fn_or_cls__ is MLFlowLogger
+    assert not hasattr(cfg.trainer.logger, "tracking_uri") or cfg.trainer.logger.tracking_uri is None

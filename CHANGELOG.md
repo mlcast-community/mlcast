@@ -42,6 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `train_from_config` no longer lets a single bad MLflow hyperparameter kill a training run. `log_hyperparams`
+  truncates values but not keys and has no error handling, so an overlong key, an immutable-param rewrite, or a
+  transient server error raised straight out of training before it started; the MLflow path is now routed
+  through `mlcast.config.mlflow.log_hyperparams`, which truncates keys too and falls back to per-key logging
+  (skipping and warning on any key that still fails) instead of raising. `use_mlflow_logger` also now accepts an
+  explicit `tracking_uri`, so a caller that already knows the tracking server doesn't have to set
+  `cfg.trainer.logger.tracking_uri` after the fact just to avoid a misleading "`MLFLOW_TRACKING_URI` is not set"
+  warning. [#32](https://github.com/mlcast-community/mlcast/pull/32) @leifdenby
 - Time-split subsets of an indexed dataset now rebase the absolute `t` indexes onto the sliced store and drop
   windows that would cross the split boundary, so they no longer read the wrong time steps or leak samples
   across splits. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
