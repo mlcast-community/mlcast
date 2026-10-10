@@ -5,6 +5,7 @@ handles training, validation, and test steps including loss computation,
 ensemble generation, and image logging.
 """
 
+import warnings
 from collections.abc import Callable
 from typing import Any
 
@@ -151,15 +152,21 @@ class NowcastLightningModule(pl.LightningModule):
                 self.global_step in self.log_images_iterations or self.global_step % self.log_images_iterations[-1] == 0
             )
         ):
-            log_images(
-                past=past,
-                future=future,
-                preds=preds,
-                logger=self.logger,  # type: ignore
-                global_step=self.global_step,
-                ensemble_size=self.hparams["ensemble_size"],
-                split=split,
-            )
+            # A failed image upload (e.g. the MLflow server's nginx answering 413 to a large,
+            # high-entropy PNG from an untrained network) must not take down a training run.
+            try:
+                log_images(
+                    past=past,
+                    future=future,
+                    preds=preds,
+                    logger=self.logger,  # type: ignore
+                    global_step=self.global_step,
+                    ensemble_size=self.hparams["ensemble_size"],
+                    split=split,
+                )
+            except Exception as e:
+                msg = f"log_images failed at step {self.global_step}, continuing: {type(e).__name__}: {e}"
+                warnings.warn(msg[:300], stacklevel=2)
         return loss
 
     def training_step(self, batch: dict[str, torch.Tensor], _batch_idx: int) -> torch.Tensor:
