@@ -10,16 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 This release folds the dataset sampler into `mlcast`: `mlcast build-sampling-index` and
 `mlcast validate-sampling-index` create and check parquet sampling indexes, and pluggable candidate selectors pick
 the subset of the index to train on. PyTorch is now installed through an extra rather than as a core dependency.
-
-**Upgrading from v0.1.0:**
-
-- Install with a PyTorch extra: `uv sync --extra cpu` (or `gpu-cu126`, `gpu-cu128`, `gpu-cu130`), or
-  `pip install "mlcast[cpu]"`.
-- Rename `SourceDataPrecomputedSamplingDataset` to `SourceDataIndexedDataset` and its `csv_path` argument to
-  `index_path`. Regenerate sampling indexes as parquet with `mlcast build-sampling-index` (legacy `.csv` indexes
-  are still read as-is).
-- The default experiment now loads `rainfall_flux` from `./data/sampled_datacubes.parquet`.
-- `target_mask` now has shape `(1, C, H, W)`, collapsed over the whole sequence.
+This release has breaking changes; see [UPGRADING.md](UPGRADING.md#v010--v020) for the upgrade steps.
 
 ### Added
 
