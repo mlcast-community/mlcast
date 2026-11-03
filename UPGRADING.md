@@ -1,7 +1,7 @@
 # Upgrading
 
-This guide lists the steps needed to upgrade between `mlcast` releases. For the full list of changes, see
-[CHANGELOG.md](CHANGELOG.md).
+This guide is a best effort at listing the steps needed to upgrade between `mlcast` releases. For the full list
+of changes, see [CHANGELOG.md](CHANGELOG.md).
 
 ## v0.1.0 → v0.2.0
 
