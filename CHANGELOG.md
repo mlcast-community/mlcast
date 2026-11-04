@@ -40,6 +40,9 @@ This release has breaking changes; see [UPGRADING.md](UPGRADING.md#v010--v020) f
 - **Breaking:** `target_mask` is now collapsed over the whole sequence to shape `(1, C, H, W)`. A cell is valid
   only if it is finite at every input and target step, and the masked loss broadcasts the mask over the forecast
   steps. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- `mlcast build-sampling-index` now writes its output next to the Zarr dataset when `-o` is omitted (was the
+  current working directory); pass `-o ./name.parquet` or an absolute path to write elsewhere.
+  [#31](https://github.com/mlcast-community/mlcast/pull/31) @leifdenby
 - The CLI and `mlcast.data` import lazily, so `mlcast -h` and the data-prep commands start in well under a
   second. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
 - **Breaking:** `torch`, `torchvision` and `pytorch-lightning` are no longer core dependencies and are installed
@@ -52,6 +55,10 @@ This release has breaking changes; see [UPGRADING.md](UPGRADING.md#v010--v020) f
 - Time-split subsets of an indexed dataset now rebase the absolute `t` indexes onto the sliced store and drop
   windows that would cross the split boundary, so they no longer read the wrong time steps or leak samples
   across splits. [#17](https://github.com/mlcast-community/mlcast/pull/17) @franchg @leifdenby @noralinn
+- `mlcast build-sampling-index` now opens its output before scanning and creates missing parent directories,
+  so an unwritable output (e.g. disk quota exceeded) fails immediately instead of after the scan starts. A write
+  failure mid-scan now aborts the run rather than leaving it hanging, and the output path is logged as an
+  absolute path. [#31](https://github.com/mlcast-community/mlcast/pull/31) @leifdenby
 
 ### Maintenance
 
