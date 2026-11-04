@@ -98,6 +98,9 @@ Any combination of these can be layered on top of the base config, and the
 fully resolved config is always saved to YAML alongside the training logs so
 runs can be reproduced exactly.
 
+The diagram below shows the full default config graph as built by
+[`training_experiment`](src/mlcast/config/base.py):
+
 ```mermaid
 erDiagram
 
@@ -190,11 +193,6 @@ LearningRateMonitor["Config: LearningRateMonitor"] {
     string logging_interval "'step'"
 }
 ```
-
-The diagram below shows the full default config graph as built by
-[`training_experiment`](src/mlcast/config/base.py):
-
-![training_experiment config graph](docs/config_diagram.svg)
 
 ### Command-line interface
 
