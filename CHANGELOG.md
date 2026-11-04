@@ -7,18 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## v0.2.1 - 2026-11-04
-
-Fixes publishing to PyPI; v0.2.0 was tagged but never uploaded. There are no code changes since v0.2.0.
-
-### Fixed
-
-- PyPI publishing failed with `'2.5' is not a valid metadata version`, because current hatchling writes
-  Metadata-Version 2.5 and the pinned `pypa/gh-action-pypi-publish` v1.14.0 bundled a twine that could not read
-  it. The action is now pinned to v1.14.3 (twine 7).
-  [#39](https://github.com/mlcast-community/mlcast/pull/39), @leifdenby
-
-## v0.2.0 - 2026-11-03
+## v0.2.0 - 2026-11-04
 
 This release folds the dataset sampler into `mlcast`: `mlcast build-sampling-index` and
 `mlcast validate-sampling-index` create and check parquet sampling indexes, and pluggable candidate selectors pick
@@ -77,6 +66,9 @@ This release has breaking changes; see [UPGRADING.md](UPGRADING.md#v010--v020) f
 - Register `equivalent_reflectivity_factor` (radar reflectivity in dBZ) in the normalization registries, so
   training on it no longer fails with a `KeyError`, and drop the non-CF `radar_reflectivity` name from the
   sampler. [#24](https://github.com/mlcast-community/mlcast/pull/24) @leifdenby
+- Pin `pypa/gh-action-pypi-publish` to v1.14.3 (twine 7). v1.14.0 rejected wheels built by current hatchling
+  (`'2.5' is not a valid metadata version`), so the first v0.2.0 tag never reached PyPI and was re-cut.
+  [#39](https://github.com/mlcast-community/mlcast/pull/39), @leifdenby
 
 ## v0.1.0 - 2026-06-01
 
