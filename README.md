@@ -98,6 +98,99 @@ Any combination of these can be layered on top of the base config, and the
 fully resolved config is always saved to YAML alongside the training logs so
 runs can be reproduced exactly.
 
+```mermaid
+erDiagram
+
+Experiment ||--|| NowcastLightningModule : ""
+NowcastLightningModule ||--|| ConvGruModel : ""
+NowcastLightningModule ||..|| Adam : ""
+NowcastLightningModule ||..|| ReduceLROnPlateau : ""
+Experiment ||--|| SourceDataDataModule : ""
+SourceDataDataModule ||..|| SourceDataIndexedDataset : ""
+SourceDataDataModule ||--|| ImportanceSelector : ""
+SourceDataDataModule ||--|| UniformSelector : ""
+Experiment ||--|| Trainer : ""
+Trainer ||--|| TensorBoardLogger : ""
+Trainer ||--o{ ModelCheckpoint : "*callback*"
+Trainer ||--o{ EarlyStopping : "*callback*"
+Trainer ||--o{ LearningRateMonitor : "*callback*"
+
+Experiment["Config: Experiment"] {
+    NowcastLightningModule pl_module
+    SourceDataDataModule data
+    Trainer trainer
+}
+NowcastLightningModule["Config: NowcastLightningModule"] {
+    ConvGruModel network
+    int ensemble_size "2"
+    string loss_class "'crps'"
+    dict loss_params
+    bool masked_loss "True"
+    Adam optimizer
+    ReduceLROnPlateau lr_scheduler
+}
+ConvGruModel["Config: ConvGruModel"] {
+    int input_channels "1"
+    int num_blocks "5"
+    bool noisy_decoder "False"
+}
+Adam["Partial: Adam"] {
+    float lr "0.0001"
+    bool fused "True"
+}
+ReduceLROnPlateau["Partial: ReduceLROnPlateau"] {
+    string mode "'min'"
+    float factor "0.5"
+    int patience "10"
+}
+SourceDataDataModule["Config: SourceDataDataModule"] {
+    SourceDataIndexedDataset dataset_factory
+    dict splits
+    ImportanceSelector train_selector
+    UniformSelector eval_selector
+    int batch_size "16"
+    int num_workers "8"
+    bool pin_memory "True"
+}
+SourceDataIndexedDataset["Partial: SourceDataIndexedDataset"] {
+    string zarr_path "'./data/radar.zarr'"
+    string index_path "'./data/sampled_datacubes.parquet'"
+    list standard_names "['rainfall_flux']"
+    int input_steps "6"
+    int forecast_steps "12"
+    bool return_mask "True"
+    bool deterministic "False"
+}
+ImportanceSelector["Config: ImportanceSelector (*no argument*)"] {
+}
+UniformSelector["Config: UniformSelector"] {
+    float keep_fraction "0.1"
+}
+Trainer["Config: Trainer"] {
+    string accelerator "'auto'"
+    TensorBoardLogger logger
+    list callbacks
+    int max_epochs "100"
+}
+TensorBoardLogger["Config: TensorBoardLogger"] {
+    string save_dir "'logs'"
+    string name "'mlcast'"
+}
+ModelCheckpoint["Config: ModelCheckpoint"] {
+    string monitor "'val_loss' or 'train_loss_epoch'"
+    string save_top_k "1"
+    string mode "'min'"
+}
+EarlyStopping["Config: EarlyStopping"] {
+    string monitor "'val_loss'"
+    int patience "100"
+    string mode "'min'"
+}
+LearningRateMonitor["Config: LearningRateMonitor"] {
+    string logging_interval "'step'"
+}
+```
+
 The diagram below shows the full default config graph as built by
 [`training_experiment`](src/mlcast/config/base.py):
 
