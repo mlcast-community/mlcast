@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## v0.2.0 - 2026-11-03
+
+This release folds the dataset sampler into `mlcast`: `mlcast build-sampling-index` and
+`mlcast validate-sampling-index` create and check parquet sampling indexes, and pluggable candidate selectors pick
+the subset of the index to train on. PyTorch is now installed through an extra rather than as a core dependency.
+This release has breaking changes; see [UPGRADING.md](UPGRADING.md#v010--v020) for the upgrade steps.
+
 ### Added
 
 - Dataset sampling folded into `mlcast` from the standalone `mlcast-dataset-sampler` as
