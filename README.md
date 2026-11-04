@@ -124,7 +124,7 @@ NowcastLightningModule["Config: NowcastLightningModule"] {
     ConvGruModel network
     int ensemble_size "2"
     string loss_class "'crps'"
-    dict loss_params
+    dict loss_params "{'temporal_lambda': 0.01}"
     bool masked_loss "True"
     Adam optimizer
     ReduceLROnPlateau lr_scheduler
@@ -145,7 +145,7 @@ ReduceLROnPlateau["Partial: ReduceLROnPlateau"] {
 }
 SourceDataDataModule["Config: SourceDataDataModule"] {
     SourceDataIndexedDataset dataset_factory
-    dict splits
+    dict splits "{'time': {'train': 0.7, 'val': 0.15, 'test': 0.15}}"
     ImportanceSelector train_selector
     UniformSelector eval_selector
     int batch_size "16"
