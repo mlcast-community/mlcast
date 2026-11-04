@@ -16,7 +16,7 @@ Fixes publishing to PyPI; v0.2.0 was tagged but never uploaded. There are no cod
 - PyPI publishing failed with `'2.5' is not a valid metadata version`, because current hatchling writes
   Metadata-Version 2.5 and the pinned `pypa/gh-action-pypi-publish` v1.14.0 bundled a twine that could not read
   it. The action is now pinned to v1.14.3 (twine 7).
-  [#PR](https://github.com/mlcast-community/mlcast/pull/PR), @leifdenby
+  [#39](https://github.com/mlcast-community/mlcast/pull/39), @leifdenby
 
 ## v0.2.0 - 2026-11-03
 
